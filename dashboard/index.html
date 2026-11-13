@@ -370,15 +370,25 @@ const TOF_MIN = 30;
 const TOF_MAX = 2000;
 
 // ── Speed estimator state ────────────────────────────────────
-// We keep the last valid reading + its timestamp per sensor
-const prevReading = { A: null, B: null };   // { dist, ts }
-const SPD_ALPHA   = 0.4;   // EMA weight on new speed estimate
-let   spdEmaA     = 0;
-let   spdEmaB     = 0;
-// Min distance change to trust the estimate (filters noise)
-const SPD_NOISE_MM = 15;
-// Speed is only shown when vehicle is in range
+// Sliding window: keep last N readings per sensor for stable derivative
+const SPD_WINDOW  = 4;      // number of samples in rolling window
+const SPD_ALPHA   = 0.35;   // EMA weight on new speed estimate
 const SPD_DISPLAY_MAX_KMH = 120;
+// Noise floor: ignore if total change across window < this (mm)
+const SPD_NOISE_MM = 3;
+
+// ringBuffer[sensor] = array of { dist, ts }
+const ringBuf = { A: [], B: [] };
+let spdEmaA = 0, spdEmaB = 0;
+
+// ── Client-side stall tracker ─────────────────────────────────
+// Tracks how long a sensor has been continuously occupied
+// independent of the firmware's State 2 requirement
+const clientStall = {
+  A: { startMs: null, sec: 0 },
+  B: { startMs: null, sec: 0 }
+};
+const CLIENT_STALL_ALERT_SEC = 8;  // alert if either side occupied > this
 
 // ── App state ────────────────────────────────────────────────
 let isSimMode   = false;
@@ -397,53 +407,72 @@ function clampTof(v) {
   return v;
 }
 
-// ── Speed estimation ─────────────────────────────────────────
-// Returns { kmh, direction } or null if not enough data
+// ── Speed estimation — sliding window derivative ──────────────
+// Formula: v = ΔD / Δt  (mm/s → km/h)
+// Uses oldest→newest sample in the window to get a stable slope
+// Returns { kmh, direction } or null
 function estimateSpeed(sensor, newDist, nowMs) {
-  const prev = prevReading[sensor];
+  const buf = ringBuf[sensor];
+
   if (newDist === null) {
-    prevReading[sensor] = null;
+    // Invalid reading — clear buffer and EMA
+    ringBuf[sensor] = [];
+    if (sensor === 'A') spdEmaA = 0; else spdEmaB = 0;
     return null;
   }
-  const result = { kmh: 0, direction: 'stationary' };
-  if (prev && prev.dist !== null) {
-    const dt = (nowMs - prev.ts) / 1000;   // seconds
-    if (dt > 0 && dt < 3.0) {              // ignore stale readings
-      const dd = prev.dist - newDist;      // positive = approaching
-      if (Math.abs(dd) >= SPD_NOISE_MM) {
-        const mmPerSec = Math.abs(dd) / dt;
-        const kmh      = mmPerSec * 0.0036;  // mm/s → km/h
-        // EMA smoothing
-        const emaKey = sensor === 'A' ? 'spdEmaA' : 'spdEmaB';
-        if (sensor === 'A') spdEmaA = SPD_ALPHA * kmh + (1 - SPD_ALPHA) * spdEmaA;
-        else                spdEmaB = SPD_ALPHA * kmh + (1 - SPD_ALPHA) * spdEmaB;
-        const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
-        result.kmh = Math.min(Math.round(smoothed), SPD_DISPLAY_MAX_KMH);
-        result.direction = dd > 0 ? 'approaching' : 'receding';
-      } else {
-        // Small change — use previous EMA, classify stationary
-        const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
-        result.kmh = Math.round(smoothed);
-        result.direction = smoothed < 1 ? 'stationary' : 'slow';
-      }
-    }
-  }
-  prevReading[sensor] = { dist: newDist, ts: nowMs };
-  return result;
+
+  // Add new sample
+  buf.push({ dist: newDist, ts: nowMs });
+  // Keep only last SPD_WINDOW samples
+  if (buf.length > SPD_WINDOW) buf.shift();
+
+  // Need at least 2 samples
+  if (buf.length < 2) return { kmh: 0, direction: 'stationary' };
+
+  const oldest = buf[0];
+  const newest = buf[buf.length - 1];
+  const dt = (newest.ts - oldest.ts) / 1000;   // seconds
+  const dd = oldest.dist - newest.dist;         // positive = approaching (dist decreasing)
+
+  if (dt <= 0 || dt > 5.0) return { kmh: 0, direction: 'stationary' };
+
+  // Raw speed from window slope
+  const mmPerSec  = Math.abs(dd) / dt;          // mm/s
+  const kmhRaw    = mmPerSec * 0.0036;          // mm/s × 0.001 m/mm × 3600 s/hr = km/h
+
+  // Update EMA — always update so it can rise and fall
+  if (sensor === 'A') spdEmaA = SPD_ALPHA * kmhRaw + (1 - SPD_ALPHA) * spdEmaA;
+  else                spdEmaB = SPD_ALPHA * kmhRaw + (1 - SPD_ALPHA) * spdEmaB;
+  const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
+
+  // Noise gate on total displacement (not per-step)
+  const totalDisp = Math.abs(dd);
+  const kmh = totalDisp < SPD_NOISE_MM
+    ? 0
+    : Math.min(Math.round(smoothed * 10) / 10, SPD_DISPLAY_MAX_KMH);
+
+  let direction;
+  if (kmh < 1)       direction = 'stationary';
+  else if (dd > 0)   direction = 'approaching';
+  else               direction = 'receding';
+
+  return { kmh, direction };
 }
 
 // ── Simulator ────────────────────────────────────────────────
 function simTelemetry() {
   simT += 0.12;
-  const rawA = 500 + 450 * Math.sin(simT * 0.55);
-  const rawB = 600 + 380 * Math.cos(simT * 0.4);
-  const threshA = 150, threshB = 150;
+  // Wider swing so vehicles actually cross threshold and produce measurable speed
+  const rawA = 800 + 700 * Math.sin(simT * 0.55);   // 100 – 1500 mm
+  const rawB = 900 + 650 * Math.cos(simT * 0.4);    // 250 – 1550 mm
+  const threshA = 500, threshB = 500;
   const occA = rawA < threshA, occB = rawB < threshB;
   let state = 0;
   if (occA && occB) state = 2;
   else if (occA || occB) state = 1;
   return {
-    dA: Math.round(rawA), dB: Math.round(rawB),
+    dA: Math.max(30, Math.round(rawA)),
+    dB: Math.max(30, Math.round(rawB)),
     threshA, threshB, state, stallSec: 0,
     modeOverride: 'NONE',
     rssi: -58, uptimeSec: Math.round((Date.now() - bootTs) / 1000),
@@ -471,16 +500,57 @@ async function poll() {
   const cB  = clampTof(d.dB);
   const spA = estimateSpeed('A', cA, now);
   const spB = estimateSpeed('B', cB, now);
+  updateClientStall(cA, cB, d.threshA ?? 150, d.threshB ?? 150, now);
   updateKPI(d, cA, cB, spA, spB);
   updateSVG(d, cA, cB, spA, spB);
   updateChart(cA, cB);
   checkEmergency(d);
   trackIncident(d, spA, spB);
-  // Sync threshold sliders to firmware values (only if user hasn't touched them)
   syncSliders(d);
 }
 setInterval(poll, 500);
 poll();
+
+// ── Client-side stall tracker ─────────────────────────────────
+// Firmware stall only triggers on State 2 (both sensors).
+// Client tracks single-sensor stall too.
+function updateClientStall(cA, cB, tA, tB, nowMs) {
+  const occA = cA !== null && cA < tA;
+  const occB = cB !== null && cB < tB;
+
+  // Sensor A
+  if (occA) {
+    if (!clientStall.A.startMs) clientStall.A.startMs = nowMs;
+    clientStall.A.sec = (nowMs - clientStall.A.startMs) / 1000;
+  } else {
+    clientStall.A.startMs = null;
+    clientStall.A.sec = 0;
+  }
+  // Sensor B
+  if (occB) {
+    if (!clientStall.B.startMs) clientStall.B.startMs = nowMs;
+    clientStall.B.sec = (nowMs - clientStall.B.startMs) / 1000;
+  } else {
+    clientStall.B.startMs = null;
+    clientStall.B.sec = 0;
+  }
+
+  // Show whichever stall is longer
+  const maxStall = Math.max(clientStall.A.sec, clientStall.B.sec);
+  document.getElementById('kpiStall').textContent = `Stall: ${maxStall.toFixed(1)} s`;
+
+  // Client-side stall alert (independent of firmware State 3)
+  const side = clientStall.A.sec >= CLIENT_STALL_ALERT_SEC ? 'A'
+             : clientStall.B.sec >= CLIENT_STALL_ALERT_SEC ? 'B' : null;
+  if (side) {
+    const sec = Math.round(clientStall[side].sec);
+    document.getElementById('overlayStall').textContent =
+      `Sensor ${side} occupied for ${sec} s`;
+    if (!alertDismissed) {
+      document.getElementById('emergencyOverlay').classList.add('show');
+    }
+  }
+}
 
 // ── KPI update ───────────────────────────────────────────────
 function updateKPI(d, cA, cB, spA, spB) {
@@ -520,9 +590,8 @@ function renderSpeed(sensor, sp, thresh, dist) {
   const kpiEl  = document.getElementById(`kpiSpd${sensor}`);
   const dirEl  = document.getElementById(`spdDir${sensor}`);
   const badgeEl= document.getElementById(`spdBadge${sensor}`);
-  // Only show speed when vehicle is in sensor range (< 2× threshold, as rough proximity gate)
-  const inRange = dist !== null && dist < thresh * 2.5;
-  if (!inRange || !sp) {
+  // Show speed whenever sensor has a valid reading (vehicle anywhere in range)
+  if (!sp || dist === null) {
     kpiEl.textContent  = '—';
     dirEl.textContent  = '—';
     dirEl.style.color  = '#475569';
@@ -530,17 +599,18 @@ function renderSpeed(sensor, sp, thresh, dist) {
     badgeEl.className  = 'speed-badge spd-stationary';
     return;
   }
-  kpiEl.textContent = sp.kmh;
+  // Show 1 decimal for low speeds, integer for higher
+  const display = sp.kmh < 10 ? sp.kmh.toFixed(1) : Math.round(sp.kmh);
+  kpiEl.textContent = display;
   const dirMap = {
-    approaching: { label: '▼ Approaching', color:'#f87171', cls:'spd-approach' },
-    receding:    { label: '▲ Receding',    color:'#4ade80', cls:'spd-recede'   },
+    approaching: { label: '▼ Approaching', color:'#f87171', cls:'spd-approach'  },
+    receding:    { label: '▲ Receding',    color:'#4ade80', cls:'spd-recede'    },
     stationary:  { label: '■ Stationary',  color:'#60a5fa', cls:'spd-stationary'},
-    slow:        { label: '◈ Slow',        color:'#facc15', cls:'spd-stationary'},
   };
   const dm = dirMap[sp.direction] ?? dirMap.stationary;
   dirEl.textContent  = dm.label;
   dirEl.style.color  = dm.color;
-  badgeEl.textContent= `${sp.kmh} km/h`;
+  badgeEl.textContent= `${display} km/h`;
   badgeEl.className  = `speed-badge ${dm.cls}`;
 }
 
@@ -620,16 +690,20 @@ function updateChart(cA, cB) {
   chartTof.update();
 }
 
-// ── Emergency overlay ────────────────────────────────────────
+// ── Emergency overlay (firmware State 3) ─────────────────────
 function checkEmergency(d) {
-  const overlay = document.getElementById('emergencyOverlay');
   if ((d.state ?? 0) === 3) {
     document.getElementById('overlayStall').textContent =
-      `Stalled for ${(d.stallSec ?? 0).toFixed(1)} s`;
-    if (!alertDismissed) overlay.classList.add('show');
-  } else {
-    overlay.classList.remove('show');
-    alertDismissed = false;  // reset for next event
+      `Both sensors occupied — stalled ${(d.stallSec ?? 0).toFixed(1)} s`;
+    if (!alertDismissed)
+      document.getElementById('emergencyOverlay').classList.add('show');
+  } else if ((d.state ?? 0) < 2) {
+    // Clear firmware stall — client stall may still keep it open
+    if (clientStall.A.sec < CLIENT_STALL_ALERT_SEC &&
+        clientStall.B.sec < CLIENT_STALL_ALERT_SEC) {
+      document.getElementById('emergencyOverlay').classList.remove('show');
+      alertDismissed = false;
+    }
   }
 }
 
@@ -646,6 +720,9 @@ function dispatchPatrol() {
 function clearEmergency() {
   logAction('Emergency cleared by operator');
   pushConfigDirect({ modeOverride: 'NONE' });
+  // Reset client stall timers so the alert doesn't immediately re-fire
+  clientStall.A.startMs = null; clientStall.A.sec = 0;
+  clientStall.B.startMs = null; clientStall.B.sec = 0;
   dismissOverlay();
 }
 function dismissOverlay() {
@@ -761,8 +838,11 @@ function setConn(ok) {
 document.getElementById('simToggle').addEventListener('change', e => {
   isSimMode = e.target.checked;
   bootTs = Date.now(); simT = 0;
-  prevReading.A = null; prevReading.B = null;
+  ringBuf.A = []; ringBuf.B = [];
   spdEmaA = 0; spdEmaB = 0;
+  clientStall.A.startMs = null; clientStall.A.sec = 0;
+  clientStall.B.startMs = null; clientStall.B.sec = 0;
+  alertDismissed = false;
   logAction(isSimMode ? 'Simulator ON' : 'Simulator OFF');
 });
 </script>
