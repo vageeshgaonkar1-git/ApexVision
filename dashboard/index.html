@@ -9,15 +9,46 @@
   <style>
     :root {
       --accent: #f97316;
-      --bg: #0f172a;
-      --card: #1e293b;
+      --bg:     #0f172a;
+      --card:   #1e293b;
       --border: #334155;
     }
-    body { background: var(--bg); color: #e2e8f0; font-family: 'Inter', sans-serif; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem; }
-    .kpi-val { font-size: 2rem; font-weight: 700; line-height: 1; }
 
-    /* Emergency banner */
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%;
+      background: var(--bg);
+      color: #e2e8f0;
+      font-family: 'Inter', ui-sans-serif, sans-serif;
+      overflow-x: hidden;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+    }
+
+    /* ── KPI ── */
+    .kpi-val  { font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -1px; }
+    .kpi-unit { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+
+    /* ── State badge ── */
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem; font-weight: 700;
+      padding: 3px 12px; border-radius: 999px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .badge-0 { background:#166534; color:#bbf7d0; }
+    .badge-1 { background:#854d0e; color:#fef9c3; }
+    .badge-2 { background:#7f1d1d; color:#fecaca; }
+    .badge-3 { background:#1e1b4b; color:#e9d5ff; animation: flashBg 0.5s infinite alternate; }
+
+    /* ── Emergency banner ── */
     #emergencyBanner {
       display: none;
       animation: flashBg 0.4s infinite alternate;
@@ -27,436 +58,469 @@
       to   { background-color: #dc2626; }
     }
 
-    /* State badge colours */
-    .badge-0 { background:#166534; color:#bbf7d0; }
-    .badge-1 { background:#854d0e; color:#fef9c3; }
-    .badge-2 { background:#7f1d1d; color:#fecaca; }
-    .badge-3 { background:#1e1b4b; color:#e9d5ff; animation: flashBg 0.5s infinite alternate; }
+    /* ── Chart wrapper — FIXED height prevents Chart.js infinite resize ── */
+    .chart-wrap { position: relative; width: 100%; height: 260px; }
 
-    /* SVG hairpin */
-    .road { fill: none; stroke: #475569; stroke-width: 28; stroke-linecap: round; }
-    .lane  { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 12 8; }
-    .vehicle { transition: cx 0.4s, cy 0.4s; }
+    /* ── SVG hairpin ── */
+    .road   { fill: none; stroke-linecap: round; }
+    .lane   { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 12 8; }
 
-    /* ── Chart container: MUST have explicit height so Chart.js
-          responsive mode doesn't cause infinite growth ── */
-    .chart-box { position: relative; width: 100%; }
-    .chart-box-tall  { height: 240px; }
-    .chart-box-short { height: 170px; }
+    /* ── Range bar ── */
+    .range-bar-bg   { background: #0f172a; border-radius: 999px; overflow: hidden; height: 10px; }
+    .range-bar-fill { height: 100%; border-radius: 999px; transition: width 0.3s; }
 
-    /* SVG card fixed height to match chart row */
-    .svg-card { height: 320px; }
+    /* ── Remote panel ── */
+    input[type=range] { accent-color: var(--accent); width: 100%; }
 
-    /* Slider style */
-    input[type=range] { accent-color: var(--accent); width:100%; }
-
-    /* Log table */
-    #logTable td, #logTable th { padding: 4px 8px; font-size: 0.75rem; }
-    #logTable tr:nth-child(even) td { background: #1e293b; }
+    /* ── Log table ── */
+    #logBody tr:nth-child(even) td { background: #162032; }
+    #logBody td, #logBody th      { padding: 4px 8px; font-size: 0.72rem; white-space: nowrap; }
   </style>
 </head>
-<body class="min-h-screen p-4">
 
-<!-- ══════════════════════════════════════════════
+<body class="p-4 pb-8">
+
+<!-- ══════════════════════════════════════════════════════
      HEADER
-══════════════════════════════════════════════ -->
-<header class="flex items-center justify-between mb-4">
+══════════════════════════════════════════════════════ -->
+<header class="flex items-center justify-between mb-5">
   <div class="flex items-center gap-3">
-    <svg width="36" height="36" viewBox="0 0 36 36">
-      <circle cx="18" cy="18" r="17" fill="#f97316" opacity="0.15" stroke="#f97316" stroke-width="1.5"/>
-      <text x="18" y="23" text-anchor="middle" font-size="18" fill="#f97316">👁</text>
-    </svg>
+    <div class="w-9 h-9 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-xl">👁</div>
     <div>
-      <h1 class="text-xl font-bold text-orange-400 leading-none">ApexVision</h1>
-      <p class="text-xs text-slate-400">Blind-Curve Hazard Warning Monitor</p>
+      <h1 class="text-lg font-extrabold text-orange-400 leading-none tracking-tight">ApexVision</h1>
+      <p class="text-xs text-slate-500 mt-0.5">Blind-Curve Hazard Warning Monitor</p>
     </div>
   </div>
-  <div class="flex items-center gap-3 text-xs text-slate-400">
-    <span id="connStatus" class="px-2 py-1 rounded bg-slate-700">● Connecting…</span>
-    <span id="lastUpdate">—</span>
-    <label class="flex items-center gap-1 cursor-pointer">
-      <input type="checkbox" id="simToggle" class="accent-orange-400" />
-      <span>Simulator</span>
+  <div class="flex items-center gap-3 text-xs">
+    <span id="connStatus" class="px-2.5 py-1 rounded-full bg-slate-700 text-slate-300">● Connecting…</span>
+    <span id="lastUpdate" class="text-slate-500">—</span>
+    <label class="flex items-center gap-1.5 cursor-pointer text-slate-400 select-none">
+      <input type="checkbox" id="simToggle" class="accent-orange-400 w-3.5 h-3.5" />
+      <span>Sim</span>
     </label>
   </div>
 </header>
 
-<!-- ══════════════════════════════════════════════
-     EMERGENCY BANNER (State 3)
-══════════════════════════════════════════════ -->
-<div id="emergencyBanner" class="rounded-xl p-4 mb-4 text-white">
+<!-- ══════════════════════════════════════════════════════
+     EMERGENCY BANNER  (State 3 — vehicle stalled)
+══════════════════════════════════════════════════════ -->
+<div id="emergencyBanner" class="rounded-xl p-4 mb-5 text-white">
   <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
     <div>
-      <p class="text-lg font-black tracking-widest">⚠ VEHICLE STALLED — HAZARD ACTIVE</p>
-      <p class="text-sm opacity-80" id="stallTimer">Stall duration: 0 s</p>
+      <p class="text-base font-black tracking-widest">⚠ VEHICLE STALLED — HAZARD ACTIVE</p>
+      <p class="text-xs opacity-75 mt-0.5" id="stallTimerBanner">Stall: 0 s</p>
     </div>
     <div class="flex gap-2 flex-wrap">
-      <button onclick="lockRedClosure()"   class="px-3 py-1.5 bg-white text-red-700   font-bold rounded text-xs">🔒 Lock Red Closure</button>
-      <button onclick="dispatchPatrol()"   class="px-3 py-1.5 bg-yellow-300 text-black font-bold rounded text-xs">🚔 Dispatch Patrol</button>
-      <button onclick="clearEmergency()"   class="px-3 py-1.5 bg-green-400  text-black font-bold rounded text-xs">✔ Clear</button>
-      <button onclick="toggleSiren()"      class="px-3 py-1.5 bg-slate-800  text-white font-bold rounded text-xs" id="sirenBtn">🔔 Siren: OFF</button>
+      <button onclick="lockRedClosure()"
+        class="px-3 py-1.5 bg-white text-red-700 font-bold rounded-lg text-xs hover:bg-red-50 transition">
+        🔒 Lock Closure
+      </button>
+      <button onclick="dispatchPatrol()"
+        class="px-3 py-1.5 bg-yellow-300 text-black font-bold rounded-lg text-xs hover:bg-yellow-200 transition">
+        🚔 Dispatch Patrol
+      </button>
+      <button onclick="clearEmergency()"
+        class="px-3 py-1.5 bg-green-400 text-black font-bold rounded-lg text-xs hover:bg-green-300 transition">
+        ✔ Clear
+      </button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════
-     KPI CARDS + SVG TWIN
-══════════════════════════════════════════════ -->
-<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+<!-- ══════════════════════════════════════════════════════
+     KPI ROW  (3 cards)
+══════════════════════════════════════════════════════ -->
+<div class="grid grid-cols-3 gap-3 mb-5">
 
-  <!-- KPI: Distance A -->
+  <!-- Sensor A -->
   <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-1">Sensor A (mm)</p>
+    <p class="text-xs text-slate-400 mb-2 font-medium">Sensor A</p>
     <p class="kpi-val text-cyan-400" id="kpiDA">—</p>
-    <p class="text-xs mt-1" id="kpiDA_thresh">thresh —</p>
+    <p class="kpi-unit">mm</p>
+    <!-- range bar: 30–2000 mm -->
+    <div class="range-bar-bg mt-3 mx-2">
+      <div id="barA" class="range-bar-fill bg-cyan-500" style="width:0%"></div>
+    </div>
+    <p class="text-xs text-slate-500 mt-1">thresh <span id="threshADisp">—</span> mm</p>
   </div>
 
-  <!-- KPI: Distance B -->
+  <!-- Sensor B -->
   <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-1">Sensor B (mm)</p>
+    <p class="text-xs text-slate-400 mb-2 font-medium">Sensor B</p>
     <p class="kpi-val text-teal-400" id="kpiDB">—</p>
-    <p class="text-xs mt-1" id="kpiDB_thresh">thresh —</p>
+    <p class="kpi-unit">mm</p>
+    <div class="range-bar-bg mt-3 mx-2">
+      <div id="barB" class="range-bar-fill bg-teal-500" style="width:0%"></div>
+    </div>
+    <p class="text-xs text-slate-500 mt-1">thresh <span id="threshBDisp">—</span> mm</p>
   </div>
 
-  <!-- KPI: State -->
-  <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-1">System State</p>
-    <span id="stateBadge" class="badge-0 text-sm font-bold px-3 py-1 rounded-full inline-block mt-1">— CLEAR —</span>
-    <p class="text-xs mt-1 text-slate-400" id="kpiStall">Stall: 0 s</p>
-  </div>
-
-  <!-- KPI: Battery SoC -->
-  <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-1">Battery (V)</p>
-    <p class="kpi-val text-green-400" id="kpiBat">—</p>
-    <p class="text-xs mt-1 text-slate-400" id="kpiBatSoc">SoC —%</p>
-  </div>
-
-  <!-- KPI: RSSI -->
-  <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-1">WiFi RSSI</p>
-    <p class="kpi-val text-purple-400" id="kpiRssi">—</p>
-    <p class="text-xs mt-1 text-slate-400" id="kpiUptime">up 0 s</p>
+  <!-- System State -->
+  <div class="card text-center flex flex-col items-center justify-center gap-2">
+    <p class="text-xs text-slate-400 font-medium">System State</p>
+    <span id="stateBadge" class="badge badge-0">CLEAR</span>
+    <p class="text-xs text-slate-500" id="kpiStall">Stall: 0.0 s</p>
+    <p class="text-xs text-slate-600" id="kpiUptime">up 0 s</p>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════════════
-     SVG HAIRPIN + CHARTS ROW
-══════════════════════════════════════════════ -->
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+<!-- ══════════════════════════════════════════════════════
+     SVG TWIN  +  LIVE ToF CHART  (side by side)
+══════════════════════════════════════════════════════ -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
 
   <!-- SVG Hairpin Digital Twin -->
-  <div class="card flex flex-col items-center svg-card">
-    <p class="text-xs text-slate-400 mb-2 self-start">Hairpin Digital Twin</p>
-    <svg id="hairpinSvg" viewBox="0 0 220 260" width="220" height="260">
-      <!-- Road outline hairpin -->
-      <path class="road" stroke-width="38" stroke="#334155"
-        d="M110,240 C110,240 30,220 30,130 C30,60 80,30 110,30 C140,30 190,60 190,130 C190,220 110,240 110,240"/>
-      <!-- Road surface -->
-      <path class="road" stroke-width="30" stroke="#475569"
-        d="M110,240 C110,240 30,220 30,130 C30,60 80,30 110,30 C140,30 190,60 190,130 C190,220 110,240 110,240"/>
-      <!-- Centre lane dashes -->
-      <path class="lane"
-        d="M110,240 C110,240 30,220 30,130 C30,60 80,30 110,30 C140,30 190,60 190,130 C190,220 110,240 110,240"/>
+  <div class="card flex flex-col">
+    <p class="text-xs text-slate-400 font-medium mb-3">Hairpin Digital Twin</p>
+    <div class="flex-1 flex flex-col items-center justify-center">
+      <svg viewBox="0 0 260 300" width="100%" style="max-width:280px; max-height:280px">
+        <!-- Road shadow -->
+        <path class="road" stroke="#1e293b" stroke-width="44"
+          d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
+        <!-- Road surface -->
+        <path class="road" stroke="#334155" stroke-width="34"
+          d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
+        <!-- Centre dashes -->
+        <path class="lane"
+          d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
 
-      <!-- Sensor A beam (bottom-left approach) -->
-      <line id="beamA" x1="30" y1="225" x2="80" y2="195" stroke="#22d3ee" stroke-width="2" stroke-dasharray="4 3" opacity="0.8"/>
-      <circle id="sensorDotA" cx="30" cy="228" r="5" fill="#22d3ee"/>
-      <text x="10" y="244" font-size="9" fill="#22d3ee">A</text>
+        <!-- Sensor A — left approach -->
+        <circle id="dotA" cx="40" cy="268" r="7" fill="#22d3ee"/>
+        <text x="6" y="285" font-size="10" fill="#22d3ee" font-weight="bold">A</text>
+        <line id="beamA" x1="40" y1="265" x2="90" y2="235"
+          stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="5 4" opacity="0.9"/>
 
-      <!-- Sensor B beam (top-right approach) -->
-      <line id="beamB" x1="190" y1="225" x2="140" y2="195" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="4 3" opacity="0.8"/>
-      <circle id="sensorDotB" cx="190" cy="228" r="5" fill="#2dd4bf"/>
-      <text x="196" y="244" font-size="9" fill="#2dd4bf">B</text>
+        <!-- Sensor B — right approach -->
+        <circle id="dotB" cx="220" cy="268" r="7" fill="#2dd4bf"/>
+        <text x="232" y="285" font-size="10" fill="#2dd4bf" font-weight="bold">B</text>
+        <line id="beamB" x1="220" y1="265" x2="170" y2="235"
+          stroke="#2dd4bf" stroke-width="2.5" stroke-dasharray="5 4" opacity="0.9"/>
 
-      <!-- Vehicle A indicator -->
-      <circle id="vehA" class="vehicle" cx="30" cy="228" r="8" fill="#f97316" opacity="0"/>
-      <!-- Vehicle B indicator -->
-      <circle id="vehB" class="vehicle" cx="190" cy="228" r="8" fill="#ef4444" opacity="0"/>
+        <!-- Vehicle markers (shown when occupied) -->
+        <circle id="vehA" cx="55"  cy="260" r="11" fill="#f97316" opacity="0"/>
+        <circle id="vehB" cx="205" cy="260" r="11" fill="#ef4444"  opacity="0"/>
 
-      <!-- State label -->
-      <text id="svgStateLabel" x="110" y="140" text-anchor="middle" font-size="11" fill="#94a3b8" font-weight="bold">CLEAR</text>
-    </svg>
-    <div class="flex gap-4 text-xs mt-1">
-      <span class="text-cyan-400">● Sensor A</span>
-      <span class="text-teal-400">● Sensor B</span>
-      <span class="text-orange-400">● Vehicle</span>
+        <!-- State label in centre -->
+        <text id="svgLabel" x="130" y="158" text-anchor="middle"
+          font-size="13" fill="#94a3b8" font-weight="bold" letter-spacing="1">CLEAR</text>
+      </svg>
+      <div class="flex gap-5 text-xs mt-2 text-slate-400">
+        <span><span class="text-cyan-400">●</span> Sensor A</span>
+        <span><span class="text-teal-400">●</span> Sensor B</span>
+        <span><span class="text-orange-400">●</span> Vehicle</span>
+      </div>
     </div>
   </div>
 
   <!-- Live ToF Chart -->
-  <div class="card">
-    <p class="text-xs text-slate-400 mb-2">Live ToF Stream (mm)</p>
-    <div class="chart-box chart-box-tall"><canvas id="chartTof"></canvas></div>
-  </div>
-
-  <!-- Hourly Traffic / Conflicts -->
-  <div class="card">
-    <p class="text-xs text-slate-400 mb-2">Hourly Traffic &amp; Conflicts</p>
-    <div class="chart-box chart-box-tall"><canvas id="chartHourly"></canvas></div>
+  <div class="card flex flex-col">
+    <p class="text-xs text-slate-400 font-medium mb-3">Live Distance Stream (mm)</p>
+    <div class="chart-wrap flex-1">
+      <canvas id="chartTof"></canvas>
+    </div>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════════════
-     SOLAR SOC CHART + REMOTE CONTROL PANEL
-══════════════════════════════════════════════ -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+<!-- ══════════════════════════════════════════════════════
+     REMOTE REGULATION PANEL  +  INCIDENT LOG
+══════════════════════════════════════════════════════ -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
 
-  <!-- 24h Solar SoC -->
+  <!-- Remote Panel -->
   <div class="card">
-    <p class="text-xs text-slate-400 mb-2">24-Hour Solar / Li-ion SoC (%)</p>
-    <div class="chart-box chart-box-short"><canvas id="chartSoc"></canvas></div>
-  </div>
-
-  <!-- Remote Regulation Panel -->
-  <div class="card">
-    <p class="text-xs text-orange-400 font-bold mb-3">⚙ Remote Regulation Panel</p>
-    <div class="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+    <p class="text-xs text-orange-400 font-bold mb-4">⚙ Remote Regulation</p>
+    <div class="space-y-4 text-xs text-slate-300">
 
       <!-- Mode Override -->
-      <div class="col-span-2">
-        <label class="text-slate-400">Mode Override</label>
-        <select id="modeSelect" class="mt-1 w-full bg-slate-700 rounded px-2 py-1 text-white text-xs">
-          <option value="NONE">NONE (Auto)</option>
+      <div>
+        <label class="block text-slate-400 mb-1">Mode Override</label>
+        <select id="modeSelect"
+          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-orange-500">
+          <option value="NONE">NONE — Auto</option>
           <option value="FORCE_RED_STOP">FORCE_RED_STOP</option>
           <option value="FORCE_YELLOW_CAUTION">FORCE_YELLOW_CAUTION</option>
           <option value="ECO_SLEEP">ECO_SLEEP</option>
         </select>
       </div>
 
-      <!-- Thresh A -->
+      <!-- Stall Timeout -->
       <div>
-        <label class="text-slate-400">Thresh A: <span id="threshAVal">500</span> mm</label>
-        <input type="range" id="threshASlider" min="180" max="900" value="500"
-          oninput="document.getElementById('threshAVal').textContent=this.value" />
-      </div>
-
-      <!-- Thresh B -->
-      <div>
-        <label class="text-slate-400">Thresh B: <span id="threshBVal">500</span> mm</label>
-        <input type="range" id="threshBSlider" min="180" max="900" value="500"
-          oninput="document.getElementById('threshBVal').textContent=this.value" />
-      </div>
-
-      <!-- Stall timeout -->
-      <div>
-        <label class="text-slate-400">Stall Timeout: <span id="stallVal">5</span> s</label>
+        <label class="block text-slate-400 mb-1">
+          Stall Timeout: <span id="stallVal" class="text-white font-bold">5</span> s
+        </label>
         <input type="range" id="stallSlider" min="2" max="30" value="5"
           oninput="document.getElementById('stallVal').textContent=this.value" />
       </div>
 
-      <!-- PWM Duty -->
-      <div>
-        <label class="text-slate-400">PWM Duty: <span id="pwmVal">128</span></label>
-        <input type="range" id="pwmSlider" min="0" max="255" value="128"
-          oninput="document.getElementById('pwmVal').textContent=this.value" />
+      <!-- Action buttons -->
+      <div class="flex gap-2 pt-1 flex-wrap">
+        <button onclick="pushConfig()"
+          class="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg text-xs transition">
+          Apply
+        </button>
+        <button onclick="remoteTare()"
+          class="px-4 py-1.5 bg-slate-600 hover:bg-slate-500 text-white font-bold rounded-lg text-xs transition">
+          🔄 Auto-Tare
+        </button>
       </div>
 
-      <!-- Buzzer toggle -->
-      <div class="flex items-center gap-2 col-span-2">
-        <label class="text-slate-400">Buzzer Enabled</label>
-        <input type="checkbox" id="buzzerCheck" checked class="accent-orange-400 w-4 h-4" />
-      </div>
+      <!-- Status feedback -->
+      <p id="configFeedback" class="text-slate-500 text-xs italic"></p>
+    </div>
+  </div>
 
-      <!-- Buttons -->
-      <div class="col-span-2 flex gap-2 mt-1 flex-wrap">
-        <button onclick="pushConfig()" class="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded text-xs">Apply Config</button>
-        <button onclick="remoteTare()"  class="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white font-bold rounded text-xs">🔄 Auto-Tare</button>
-      </div>
+  <!-- Incident Log -->
+  <div class="card flex flex-col">
+    <div class="flex items-center justify-between mb-3">
+      <p class="text-xs text-orange-400 font-bold">📋 Incident Log</p>
+      <button onclick="exportCSV()"
+        class="text-xs px-2 py-1 bg-slate-600 hover:bg-slate-500 rounded-lg transition">
+        ⬇ Export CSV
+      </button>
+    </div>
+    <div class="overflow-y-auto" style="max-height:220px">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="text-slate-400 border-b border-slate-700 text-xs">
+            <th class="pb-1 px-2">Time</th>
+            <th class="pb-1 px-2">State</th>
+            <th class="pb-1 px-2">A mm</th>
+            <th class="pb-1 px-2">B mm</th>
+            <th class="pb-1 px-2">Stall</th>
+            <th class="pb-1 px-2">Note</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
     </div>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════════════
-     INCIDENT LOG
-══════════════════════════════════════════════ -->
-<div class="card mb-4">
-  <div class="flex items-center justify-between mb-2">
-    <p class="text-xs text-orange-400 font-bold">📋 Incident Log</p>
-    <button onclick="exportCSV()" class="text-xs px-2 py-1 bg-slate-600 hover:bg-slate-500 rounded">⬇ Export CSV</button>
-  </div>
-  <div class="overflow-x-auto max-h-48 overflow-y-auto">
-    <table class="w-full text-left border-collapse" id="logTable">
-      <thead>
-        <tr class="text-slate-400 border-b border-slate-700">
-          <th>Timestamp</th><th>State</th><th>dA</th><th>dB</th><th>StallSec</th><th>vBat</th><th>Note</th>
-        </tr>
-      </thead>
-      <tbody id="logBody"></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════
+<!-- ══════════════════════════════════════════════════════
      JAVASCRIPT
-══════════════════════════════════════════════ -->
+══════════════════════════════════════════════════════ -->
 <script>
-// ─────────────────────────────────────────────
-//  Firebase Config
-// ─────────────────────────────────────────────
-const FB_BASE = 'https://apexvision-8f1e4-default-rtdb.asia-southeast1.firebasedatabase.app';
-const NODE    = 'node_01';
+// ── Firebase ──────────────────────────────────────────
+const FB_BASE    = 'https://apexvision-8f1e4-default-rtdb.asia-southeast1.firebasedatabase.app';
+const NODE       = 'node_01';
 const TELEM_URL  = `${FB_BASE}/nodes/${NODE}/telemetry.json`;
 const CONFIG_URL = `${FB_BASE}/nodes/${NODE}/config.json`;
 
-// ─────────────────────────────────────────────
-//  State
-// ─────────────────────────────────────────────
-let isSimMode  = false;
-let sirenActive = false;
-let sirenOsc   = null;
-let sirenGain  = null;
-let audioCtx   = null;
+// ── Sensor valid range (VL53L0X spec) ─────────────────
+const TOF_MIN = 30;    // mm
+const TOF_MAX = 2000;  // mm
+
+// ── App state ─────────────────────────────────────────
+let isSimMode   = false;
 let incidentLog = [];
-let lastState  = -1;
+let lastState   = -1;
+let simT        = 0;
+let bootTs      = Date.now();
 
 const STATE_LABELS = ['CLEAR', 'ONE-SIDE', 'BOTH-OCC', 'STALL ⚠'];
-const STATE_BADGE  = ['badge-0','badge-1','badge-2','badge-3'];
+const STATE_BADGE  = ['badge-0', 'badge-1', 'badge-2', 'badge-3'];
+const STATE_COLORS = ['#22c55e', '#eab308', '#ef4444', '#a855f7'];
 
-// Hourly counters
-let hourlyTraffic   = new Array(24).fill(0);
-let hourlyConflicts = new Array(24).fill(0);
-let socHistory      = new Array(24).fill(100); // SoC % over 24 h
+// ── Clamp to valid sensor range ────────────────────────
+function clampTof(v) {
+  if (typeof v !== 'number' || isNaN(v)) return null;
+  if (v < TOF_MIN || v > TOF_MAX) return null;  // out-of-range → null (not plotted)
+  return v;
+}
 
-// ─────────────────────────────────────────────
-//  SIMULATOR  (offline fallback)
-// ─────────────────────────────────────────────
-let simT = 0;
+// ── Simulator ─────────────────────────────────────────
 function simTelemetry() {
-  simT += 0.1;
-  const dA = 400 + 300 * Math.sin(simT * 0.7);
-  const dB = 450 + 280 * Math.cos(simT * 0.5);
+  simT += 0.12;
+  const rawA = 500 + 400 * Math.sin(simT * 0.6);
+  const rawB = 550 + 350 * Math.cos(simT * 0.45);
   const threshA = 500, threshB = 500;
-  const occA = dA < threshA, occB = dB < threshB;
+  const occA = rawA < threshA, occB = rawB < threshB;
   let state = 0;
   if (occA && occB) state = 2;
   else if (occA || occB) state = 1;
   return {
-    dA: Math.round(dA), dB: Math.round(dB),
+    dA: Math.round(rawA), dB: Math.round(rawB),
     threshA, threshB,
     state,
-    stallSec: state === 3 ? 7 : 0,
+    stallSec: 0,
     modeOverride: 'NONE',
-    vBat: 3.7 + 0.3 * Math.sin(simT * 0.01),
-    rssi: -55 + Math.round(10 * Math.sin(simT)),
-    uptimeSec: Math.round(simT * 10),
+    rssi: -58 + Math.round(8 * Math.sin(simT)),
+    uptimeSec: Math.round((Date.now() - bootTs) / 1000),
     sensorA_ok: true, sensorB_ok: true
   };
 }
 
-// ─────────────────────────────────────────────
-//  FETCH TELEMETRY
-// ─────────────────────────────────────────────
+// ── Fetch telemetry ───────────────────────────────────
 async function fetchTelemetry() {
   if (isSimMode) return simTelemetry();
   try {
     const r = await fetch(TELEM_URL, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     return await r.json();
-  } catch (e) {
-    setConnStatus(false);
+  } catch {
+    setConn(false);
     return null;
   }
 }
 
-// ─────────────────────────────────────────────
-//  MAIN POLL LOOP
-// ─────────────────────────────────────────────
+// ── Main poll loop (500 ms) ───────────────────────────
 async function poll() {
-  const data = await fetchTelemetry();
-  if (!data) return;
-  setConnStatus(true);
-  updateUI(data);
-  updateCharts(data);
-  checkEmergency(data);
-  trackIncident(data);
+  const d = await fetchTelemetry();
+  if (!d) return;
+  setConn(true);
+  updateKPI(d);
+  updateSVG(d);
+  updateChart(d);
+  checkEmergency(d);
+  trackIncident(d);
 }
-
 setInterval(poll, 500);
 poll();
 
-// ─────────────────────────────────────────────
-//  UI UPDATE
-// ─────────────────────────────────────────────
-function updateUI(d) {
-  document.getElementById('kpiDA').textContent        = d.dA;
-  document.getElementById('kpiDA_thresh').textContent = `thresh ${d.threshA}`;
-  document.getElementById('kpiDB').textContent        = d.dB;
-  document.getElementById('kpiDB_thresh').textContent = `thresh ${d.threshB}`;
-  document.getElementById('kpiBat').textContent       = d.vBat.toFixed(2);
-  document.getElementById('kpiBatSoc').textContent    = `SoC ${batSoc(d.vBat)}%`;
-  document.getElementById('kpiRssi').textContent      = d.rssi;
-  document.getElementById('kpiUptime').textContent    = `up ${d.uptimeSec} s`;
-  document.getElementById('kpiStall').textContent     = `Stall: ${d.stallSec.toFixed(1)} s`;
-  document.getElementById('stallTimer').textContent   = `Stall duration: ${d.stallSec.toFixed(1)} s`;
-  document.getElementById('lastUpdate').textContent   = new Date().toLocaleTimeString();
+// ── KPI Cards ─────────────────────────────────────────
+function updateKPI(d) {
+  const cA = clampTof(d.dA);
+  const cB = clampTof(d.dB);
+
+  // Sensor A
+  document.getElementById('kpiDA').textContent = cA !== null ? cA : 'OOR';
+  document.getElementById('threshADisp').textContent = d.threshA ?? '—';
+  const pctA = cA !== null ? Math.round(((cA - TOF_MIN) / (TOF_MAX - TOF_MIN)) * 100) : 0;
+  document.getElementById('barA').style.width = pctA + '%';
+  // Turn bar red when below threshold
+  document.getElementById('barA').style.background =
+    (cA !== null && cA < (d.threshA ?? 500)) ? '#ef4444' : '#22d3ee';
+
+  // Sensor B
+  document.getElementById('kpiDB').textContent = cB !== null ? cB : 'OOR';
+  document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
+  const pctB = cB !== null ? Math.round(((cB - TOF_MIN) / (TOF_MAX - TOF_MIN)) * 100) : 0;
+  document.getElementById('barB').style.width = pctB + '%';
+  document.getElementById('barB').style.background =
+    (cB !== null && cB < (d.threshB ?? 500)) ? '#ef4444' : '#2dd4bf';
 
   // State badge
   const badge = document.getElementById('stateBadge');
-  badge.className = STATE_BADGE[d.state] + ' text-sm font-bold px-3 py-1 rounded-full inline-block mt-1';
-  badge.textContent = STATE_LABELS[d.state];
+  const s = Math.min(d.state ?? 0, 3);
+  badge.className = 'badge badge-' + s;
+  badge.textContent = STATE_LABELS[s];
 
-  // Sync config sliders to received thresholds (once)
-  document.getElementById('threshASlider').value = d.threshA;
-  document.getElementById('threshAVal').textContent = d.threshA;
-  document.getElementById('threshBSlider').value = d.threshB;
-  document.getElementById('threshBVal').textContent = d.threshB;
+  // Stall / uptime
+  document.getElementById('kpiStall').textContent =
+    `Stall: ${(d.stallSec ?? 0).toFixed(1)} s`;
+  document.getElementById('kpiUptime').textContent =
+    `up ${d.uptimeSec ?? 0} s`;
 
-  // SVG twin
-  updateSVG(d);
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
 }
 
-// ─────────────────────────────────────────────
-//  SVG DIGITAL TWIN UPDATE
-// ─────────────────────────────────────────────
+// ── SVG Digital Twin ──────────────────────────────────
 function updateSVG(d) {
-  const occA = d.dA < d.threshA;
-  const occB = d.dB < d.threshB;
-  const vA = document.getElementById('vehA');
-  const vB = document.getElementById('vehB');
+  const occA = (clampTof(d.dA) ?? 9999) < (d.threshA ?? 500);
+  const occB = (clampTof(d.dB) ?? 9999) < (d.threshB ?? 500);
+  const s    = Math.min(d.state ?? 0, 3);
 
-  // Vehicle circles appear when sensor detects object
-  vA.setAttribute('opacity', occA ? '0.9' : '0');
-  vB.setAttribute('opacity', occB ? '0.9' : '0');
-
-  // Beam colour reflects occupancy
+  document.getElementById('vehA').setAttribute('opacity', occA ? '1' : '0');
+  document.getElementById('vehB').setAttribute('opacity', occB ? '1' : '0');
   document.getElementById('beamA').setAttribute('stroke', occA ? '#f97316' : '#22d3ee');
-  document.getElementById('beamB').setAttribute('stroke', occB ? '#ef4444' : '#2dd4bf');
-
-  // Sensor dot pulse colours
-  document.getElementById('sensorDotA').setAttribute('fill', occA ? '#f97316' : '#22d3ee');
-  document.getElementById('sensorDotB').setAttribute('fill', occB ? '#ef4444' : '#2dd4bf');
-
-  document.getElementById('svgStateLabel').textContent = STATE_LABELS[d.state];
+  document.getElementById('beamB').setAttribute('stroke', occB ? '#ef4444'  : '#2dd4bf');
+  document.getElementById('dotA').setAttribute('fill',   occA ? '#f97316' : '#22d3ee');
+  document.getElementById('dotB').setAttribute('fill',   occB ? '#ef4444'  : '#2dd4bf');
+  document.getElementById('svgLabel').textContent  = STATE_LABELS[s];
+  document.getElementById('svgLabel').setAttribute('fill', STATE_COLORS[s]);
 }
 
-// ─────────────────────────────────────────────
-//  BATTERY SOC ESTIMATE (3.0–4.2 V LiPo)
-// ─────────────────────────────────────────────
-function batSoc(v) {
-  const pct = ((v - 3.0) / (4.2 - 3.0)) * 100;
-  return Math.min(100, Math.max(0, Math.round(pct)));
+// ── Live ToF Chart ────────────────────────────────────
+const tofLabels = [];
+const tofDataA  = [];
+const tofDataB  = [];
+const MAX_PTS   = 60;
+
+const chartTof = new Chart(document.getElementById('chartTof'), {
+  type: 'line',
+  data: {
+    labels: tofLabels,
+    datasets: [
+      {
+        label: 'Sensor A',
+        data: tofDataA,
+        borderColor: '#22d3ee',
+        backgroundColor: 'rgba(34,211,238,0.06)',
+        tension: 0.35, pointRadius: 0, borderWidth: 2, fill: true,
+        spanGaps: false   // breaks line on null (OOR readings)
+      },
+      {
+        label: 'Sensor B',
+        data: tofDataB,
+        borderColor: '#2dd4bf',
+        backgroundColor: 'rgba(45,212,191,0.06)',
+        tension: 0.35, pointRadius: 0, borderWidth: 2, fill: true,
+        spanGaps: false
+      }
+    ]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        ticks: { color: '#475569', maxRotation: 0, maxTicksLimit: 6, font: { size: 10 } },
+        grid:  { color: '#1e293b' }
+      },
+      y: {
+        min: 0, max: TOF_MAX + 100,
+        ticks: { color: '#475569', font: { size: 10 } },
+        grid:  { color: '#1e293b' },
+        title: { display: true, text: 'mm', color: '#475569', font: { size: 10 } }
+      }
+    },
+    plugins: {
+      legend: { labels: { color: '#94a3b8', boxWidth: 10, font: { size: 11 } } },
+      tooltip: {
+        callbacks: {
+          label: ctx => ctx.parsed.y !== null
+            ? ` ${ctx.dataset.label}: ${ctx.parsed.y} mm`
+            : ` ${ctx.dataset.label}: out-of-range`
+        }
+      }
+    }
+  }
+});
+
+function updateChart(d) {
+  const t  = new Date().toLocaleTimeString();
+  const cA = clampTof(d.dA);   // null if OOR
+  const cB = clampTof(d.dB);
+
+  tofLabels.push(t);
+  tofDataA.push(cA);
+  tofDataB.push(cB);
+
+  if (tofLabels.length > MAX_PTS) {
+    tofLabels.shift(); tofDataA.shift(); tofDataB.shift();
+  }
+  chartTof.update();
 }
 
-// ─────────────────────────────────────────────
-//  EMERGENCY BANNER
-// ─────────────────────────────────────────────
+// ── Emergency Banner ──────────────────────────────────
 function checkEmergency(d) {
   const banner = document.getElementById('emergencyBanner');
-  if (d.state === 3) {
+  if ((d.state ?? 0) === 3) {
     banner.style.display = 'block';
-    if (sirenActive && !sirenOsc) startSiren();
+    document.getElementById('stallTimerBanner').textContent =
+      `Stall: ${(d.stallSec ?? 0).toFixed(1)} s`;
   } else {
     banner.style.display = 'none';
-    stopSiren();
   }
 }
 
 function lockRedClosure() {
-  logAction('Lock Red Closure activated');
+  logAction('Lock Closure activated');
   pushConfigDirect({ modeOverride: 'FORCE_RED_STOP' });
 }
 function dispatchPatrol() {
@@ -464,49 +528,20 @@ function dispatchPatrol() {
   alert('🚔 Patrol dispatch logged. Notify your control room.');
 }
 function clearEmergency() {
-  logAction('Emergency cleared');
+  logAction('Emergency cleared by operator');
   pushConfigDirect({ modeOverride: 'NONE' });
   document.getElementById('emergencyBanner').style.display = 'none';
-  stopSiren();
 }
 
-// ─────────────────────────────────────────────
-//  SIREN (Web Audio)
-// ─────────────────────────────────────────────
-function toggleSiren() {
-  sirenActive = !sirenActive;
-  document.getElementById('sirenBtn').textContent = `🔔 Siren: ${sirenActive ? 'ON' : 'OFF'}`;
-  if (!sirenActive) stopSiren();
-}
-function startSiren() {
-  if (sirenOsc) return;
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-  sirenOsc  = audioCtx.createOscillator();
-  sirenGain = audioCtx.createGain();
-  sirenGain.gain.value = 0.4;
-  sirenOsc.connect(sirenGain);
-  sirenGain.connect(audioCtx.destination);
-  sirenOsc.frequency.setValueAtTime(600, audioCtx.currentTime);
-  sirenOsc.frequency.setValueAtTime(900, audioCtx.currentTime + 0.5);
-  sirenOsc.start();
-}
-function stopSiren() {
-  if (sirenOsc) { try { sirenOsc.stop(); } catch(e){} sirenOsc = null; }
-}
-
-// ─────────────────────────────────────────────
-//  PUSH CONFIG  PATCH /config.json
-// ─────────────────────────────────────────────
+// ── Remote Config ─────────────────────────────────────
 async function pushConfig() {
   const cfg = {
     modeOverride:    document.getElementById('modeSelect').value,
-    threshA:         parseInt(document.getElementById('threshASlider').value),
-    threshB:         parseInt(document.getElementById('threshBSlider').value),
-    stallTimeoutSec: parseInt(document.getElementById('stallSlider').value),
-    pwmDuty:         parseInt(document.getElementById('pwmSlider').value),
-    buzzerEnabled:   document.getElementById('buzzerCheck').checked
+    stallTimeoutSec: parseInt(document.getElementById('stallSlider').value)
   };
   await pushConfigDirect(cfg);
+  const fb = document.getElementById('configFeedback');
+  fb.textContent = '✓ Config applied at ' + new Date().toLocaleTimeString();
   logAction('Config applied: ' + JSON.stringify(cfg));
 }
 
@@ -518,164 +553,81 @@ async function pushConfigDirect(cfg) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg)
     });
-  } catch(e) { console.error('[Config PATCH]', e); }
+  } catch (e) { console.error('[Config PATCH]', e); }
 }
 
 async function remoteTare() {
   await pushConfigDirect({ recalibrate: true });
+  document.getElementById('configFeedback').textContent =
+    '✓ Auto-Tare triggered at ' + new Date().toLocaleTimeString();
   logAction('Remote Auto-Tare triggered');
 }
 
-// ─────────────────────────────────────────────
-//  INCIDENT LOG
-// ─────────────────────────────────────────────
+// ── Incident Log ──────────────────────────────────────
 function trackIncident(d) {
-  if (d.state !== lastState) {
-    lastState = d.state;
-    if (d.state >= 1) {
-      const row = {
-        ts: new Date().toLocaleString(),
-        state: STATE_LABELS[d.state],
-        dA: d.dA, dB: d.dB,
-        stall: d.stallSec.toFixed(1),
-        vBat: d.vBat.toFixed(2),
-        note: d.state === 3 ? 'AUTO-ALERT' : ''
-      };
-      incidentLog.unshift(row);
+  const s = d.state ?? 0;
+  if (s !== lastState) {
+    lastState = s;
+    if (s >= 1) {
+      incidentLog.unshift({
+        ts:    new Date().toLocaleTimeString(),
+        state: STATE_LABELS[Math.min(s, 3)],
+        dA:    d.dA, dB: d.dB,
+        stall: (d.stallSec ?? 0).toFixed(1),
+        note:  s === 3 ? '⚠ AUTO-ALERT' : ''
+      });
       renderLog();
     }
   }
 }
 function logAction(note) {
   incidentLog.unshift({
-    ts: new Date().toLocaleString(), state: '—', dA: '—', dB: '—', stall: '—', vBat: '—', note
+    ts: new Date().toLocaleTimeString(),
+    state: '—', dA: '—', dB: '—', stall: '—', note
   });
   renderLog();
 }
 function renderLog() {
-  const tbody = document.getElementById('logBody');
-  tbody.innerHTML = incidentLog.slice(0, 50).map(r =>
-    `<tr><td>${r.ts}</td><td>${r.state}</td><td>${r.dA}</td><td>${r.dB}</td><td>${r.stall}</td><td>${r.vBat}</td><td>${r.note}</td></tr>`
-  ).join('');
+  document.getElementById('logBody').innerHTML =
+    incidentLog.slice(0, 60).map(r =>
+      `<tr>
+        <td class="px-2">${r.ts}</td>
+        <td class="px-2">${r.state}</td>
+        <td class="px-2">${r.dA}</td>
+        <td class="px-2">${r.dB}</td>
+        <td class="px-2">${r.stall}</td>
+        <td class="px-2">${r.note}</td>
+      </tr>`
+    ).join('');
 }
 
 function exportCSV() {
-  const header = 'Timestamp,State,dA,dB,StallSec,vBat,Note\n';
-  const rows   = incidentLog.map(r => `"${r.ts}",${r.state},${r.dA},${r.dB},${r.stall},${r.vBat},"${r.note}"`).join('\n');
-  const blob   = new Blob([header + rows], { type: 'text/csv' });
-  const a      = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `apexvision_log_${Date.now()}.csv`;
+  const hdr  = 'Time,State,dA,dB,StallSec,Note\n';
+  const rows = incidentLog
+    .map(r => `"${r.ts}","${r.state}",${r.dA},${r.dB},${r.stall},"${r.note}"`)
+    .join('\n');
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([hdr + rows], { type: 'text/csv' })),
+    download: `apexvision_${Date.now()}.csv`
+  });
   a.click();
 }
 
-// ─────────────────────────────────────────────
-//  CONNECTION STATUS
-// ─────────────────────────────────────────────
-function setConnStatus(ok) {
+// ── Connection status ─────────────────────────────────
+function setConn(ok) {
   const el = document.getElementById('connStatus');
   el.textContent = ok ? '● Live' : '● Offline';
-  el.className   = `px-2 py-1 rounded ${ok ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`;
+  el.className = `px-2.5 py-1 rounded-full text-xs ${
+    ok ? 'bg-green-900/60 text-green-300' : 'bg-red-900/60 text-red-300'
+  }`;
 }
 
-// ─────────────────────────────────────────────
-//  SIMULATOR TOGGLE
-// ─────────────────────────────────────────────
+// ── Simulator toggle ──────────────────────────────────
 document.getElementById('simToggle').addEventListener('change', e => {
   isSimMode = e.target.checked;
-  logAction(isSimMode ? 'Simulator mode ON' : 'Simulator mode OFF');
+  bootTs    = Date.now();
+  logAction(isSimMode ? 'Simulator ON' : 'Simulator OFF');
 });
-
-// ─────────────────────────────────────────────
-//  CHARTS
-// ─────────────────────────────────────────────
-const tofLabels = [];
-const tofDataA  = [];
-const tofDataB  = [];
-const MAX_TOF   = 60;
-
-const chartTof = new Chart(document.getElementById('chartTof'), {
-  type: 'line',
-  data: {
-    labels: tofLabels,
-    datasets: [
-      { label: 'Sensor A', data: tofDataA, borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.07)', tension: 0.3, pointRadius: 0 },
-      { label: 'Sensor B', data: tofDataB, borderColor: '#2dd4bf', backgroundColor: 'rgba(45,212,191,0.07)', tension: 0.3, pointRadius: 0 }
-    ]
-  },
-  options: {
-    animation: false, responsive: true, maintainAspectRatio: false,
-    scales: {
-      x: { ticks: { color:'#64748b', maxRotation:0, maxTicksLimit: 6 }, grid: { color:'#1e293b' } },
-      y: { ticks: { color:'#64748b' }, grid: { color:'#1e293b' }, min: 0, max: 2100 }
-    },
-    plugins: { legend: { labels: { color:'#94a3b8', boxWidth:10 } } }
-  }
-});
-
-const hourLabels = Array.from({length:24}, (_,i) => `${i}:00`);
-const chartHourly = new Chart(document.getElementById('chartHourly'), {
-  type: 'bar',
-  data: {
-    labels: hourLabels,
-    datasets: [
-      { label: 'Traffic',   data: hourlyTraffic,   backgroundColor: 'rgba(249,115,22,0.6)' },
-      { label: 'Conflicts', data: hourlyConflicts, backgroundColor: 'rgba(239,68,68,0.6)' }
-    ]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    scales: {
-      x: { ticks: { color:'#64748b', maxRotation:45, maxTicksLimit:12 }, grid: { color:'#1e293b' } },
-      y: { ticks: { color:'#64748b' }, grid: { color:'#1e293b' } }
-    },
-    plugins: { legend: { labels: { color:'#94a3b8', boxWidth:10 } } }
-  }
-});
-
-const chartSoc = new Chart(document.getElementById('chartSoc'), {
-  type: 'line',
-  data: {
-    labels: hourLabels,
-    datasets: [{
-      label: 'SoC %',
-      data: socHistory,
-      borderColor: '#4ade80',
-      backgroundColor: 'rgba(74,222,128,0.1)',
-      fill: true, tension: 0.4, pointRadius: 2
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    scales: {
-      x: { ticks: { color:'#64748b', maxRotation:45, maxTicksLimit:12 }, grid: { color:'#1e293b' } },
-      y: { ticks: { color:'#64748b' }, grid: { color:'#1e293b' }, min:0, max:100 }
-    },
-    plugins: { legend: { labels: { color:'#94a3b8', boxWidth:10 } } }
-  }
-});
-
-function updateCharts(d) {
-  const now = new Date().toLocaleTimeString();
-  tofLabels.push(now);
-  tofDataA.push(d.dA);
-  tofDataB.push(d.dB);
-  if (tofLabels.length > MAX_TOF) { tofLabels.shift(); tofDataA.shift(); tofDataB.shift(); }
-  chartTof.update();
-
-  // Hourly accumulators
-  const h = new Date().getHours();
-  if (d.state >= 1) hourlyTraffic[h]++;
-  if (d.state >= 2) hourlyConflicts[h]++;
-  chartHourly.data.datasets[0].data = [...hourlyTraffic];
-  chartHourly.data.datasets[1].data = [...hourlyConflicts];
-  chartHourly.update();
-
-  // SoC history
-  socHistory[h] = batSoc(d.vBat);
-  chartSoc.data.datasets[0].data = [...socHistory];
-  chartSoc.update();
-}
 </script>
 </body>
 </html>
