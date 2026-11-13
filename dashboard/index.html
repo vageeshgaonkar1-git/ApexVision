@@ -603,24 +603,23 @@ function updateOneSensor(sensor, occupied, nowMs) {
 
 // ── KPI update ───────────────────────────────────────────────
 function updateKPI(d, cA, cB, spA, spB) {
-  // Distance — show Out of Range when no object detected (> 2000 mm)
-  document.getElementById('kpiDA').textContent = cA ?? 'Out of Range';
-  document.getElementById('kpiDB').textContent = cB ?? 'Out of Range';
+  // Distance — null means > 2000 mm (OOR sentinel from firmware)
+  document.getElementById('kpiDA').textContent = cA !== null ? cA : 'Out of Range';
+  document.getElementById('kpiDB').textContent = cB !== null ? cB : 'Out of Range';
   document.getElementById('threshADisp').textContent = d.threshA ?? '—';
   document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
-  // FW threshold display in panel
   document.getElementById('threshAFW').textContent = d.threshA ?? '—';
   document.getElementById('threshBFW').textContent = d.threshB ?? '—';
 
-  // Range bars
-  const pA = cA ? Math.round(((cA - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
-  const pB = cB ? Math.round(((cB - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
+  // Range bars — 0 width when OOR (cA null)
+  const pA = cA !== null ? Math.round(((cA - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
+  const pB = cB !== null ? Math.round(((cB - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
   const bA = document.getElementById('barA');
   const bB = document.getElementById('barB');
   bA.style.width = pA + '%';
   bB.style.width = pB + '%';
-  bA.style.background = (cA && cA < (d.threshA??150)) ? '#ef4444' : '#22d3ee';
-  bB.style.background = (cB && cB < (d.threshB??150)) ? '#ef4444' : '#2dd4bf';
+  bA.style.background = (cA !== null && cA < (d.threshA??150)) ? '#ef4444' : '#22d3ee';
+  bB.style.background = (cB !== null && cB < (d.threshB??150)) ? '#ef4444' : '#2dd4bf';
 
   // Speed KPIs
   renderSpeed('A', spA, d.threshA ?? 150, cA);
@@ -631,7 +630,8 @@ function updateKPI(d, cA, cB, spA, spB) {
   const badge = document.getElementById('stateBadge');
   badge.className = 'badge badge-' + s;
   badge.textContent = STATE_LABELS[s];
-  document.getElementById('kpiStall').textContent = `Stall: ${(d.stallSec??0).toFixed(1)} s`;
+  // kpiStall is owned by updateClientStall() — do not overwrite it here
+
   document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
 }
 
