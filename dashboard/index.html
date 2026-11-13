@@ -369,15 +369,18 @@ const CONFIG_URL= `${FB_BASE}/nodes/${NODE}/config.json`;
 const TOF_MIN = 30;
 const TOF_MAX = 2000;
 
-// ── Speed estimator state ────────────────────────────────────
-// Sliding window: keep last N readings per sensor for stable derivative
-const SPD_WINDOW  = 4;      // number of samples in rolling window
-const SPD_ALPHA   = 0.35;   // EMA weight on new speed estimate
-const SPD_DISPLAY_MAX_KMH = 120;
-// Noise floor: ignore if total change across window < this (mm)
-const SPD_NOISE_MM = 3;
+// ── Tabletop scale factor ─────────────────────────────────────
+// Toy car at 15 cm/s = 0.54 km/h raw → ×10 = 5.4 km/h displayed.
+// Set to 1 for real vehicles, 10 for scale-model demo.
+const SPEED_SCALE = 10;
 
-// ringBuffer[sensor] = array of { dist, ts }
+// ── Speed estimator constants ─────────────────────────────────
+const SPD_WINDOW          = 5;    // rolling window samples
+const SPD_ALPHA           = 0.35; // EMA smoothing weight
+const SPD_DISPLAY_MAX_KMH = 120;
+const SPD_NOISE_MM        = 12;   // min displacement across window to register speed
+
+// ringBuffer[sensor] = array of { dist, ts, dir }
 const ringBuf = { A: [], B: [] };
 let spdEmaA = 0, spdEmaB = 0;
 
@@ -412,61 +415,77 @@ const STATE_LABELS = ['CLEAR', 'ONE-SIDE', 'BOTH-OCC', 'STALL ⚠'];
 const STATE_COLORS = ['#22c55e','#eab308','#ef4444','#a855f7'];
 
 // ── Clamp to VL53L0X valid range ─────────────────────────────
+// Values > 2000 mm (8190, 9999) → clamp to 2000 (clear lane).
+// Values < 30 mm → null (sensor offline / too close).
 function clampTof(v) {
-  if (typeof v !== 'number' || isNaN(v) || v < TOF_MIN || v > TOF_MAX) return null;
-  return v;
+  if (typeof v !== 'number' || isNaN(v) || v < TOF_MIN) return null;
+  if (v > TOF_MAX) return TOF_MAX;   // 8190 / 9999 → 2000 mm clear road
+  return Math.round(v);
 }
 
-// ── Speed estimation — sliding window derivative ──────────────
-// Formula: v = ΔD / Δt  (mm/s → km/h)
-// Uses oldest→newest sample in the window to get a stable slope
-// Returns { kmh, direction } or null
+// ── Speed estimation — sliding window + duplicate-frame guard ─
+// Formula: v = |ΔD| / Δt  (mm/s → km/h × SPEED_SCALE)
+// Duplicate Firebase frames (same dist within 700 ms) are skipped
+// to avoid inflating dt and producing false zero speed.
 function estimateSpeed(sensor, newDist, nowMs) {
   const buf = ringBuf[sensor];
 
   if (newDist === null) {
-    // Invalid reading — clear buffer and EMA
-    ringBuf[sensor] = [];
-    if (sensor === 'A') spdEmaA = 0; else spdEmaB = 0;
-    return null;
+    // Sensor offline — preserve buffer, return clear state
+    return { kmh: 0, cmPerSec: 0, direction: 'clear' };
   }
 
-  // Add new sample
-  buf.push({ dist: newDist, ts: nowMs });
-  // Keep only last SPD_WINDOW samples
-  if (buf.length > SPD_WINDOW) buf.shift();
+  // Skip duplicate Firebase poll frames
+  if (buf.length > 0) {
+    const last = buf[buf.length - 1];
+    if (last.dist === newDist && (nowMs - last.ts) < 700) {
+      const held = sensor === 'A' ? spdEmaA : spdEmaB;
+      return {
+        kmh:      Math.round(held * 10) / 10,
+        cmPerSec: Math.round((held / (0.036 * SPEED_SCALE)) * 10) / 10,
+        direction: held < 0.3
+          ? (newDist >= 1950 ? 'clear' : 'stationary')
+          : (last.dir || 'stationary')
+      };
+    }
+  }
 
-  // Need at least 2 samples
-  if (buf.length < 2) return { kmh: 0, direction: 'stationary' };
+  buf.push({ dist: newDist, ts: nowMs, dir: 'stationary' });
+  if (buf.length > SPD_WINDOW) buf.shift();
+  if (buf.length < 2) {
+    return { kmh: 0, cmPerSec: 0, direction: newDist >= 1950 ? 'clear' : 'stationary' };
+  }
 
   const oldest = buf[0];
   const newest = buf[buf.length - 1];
   const dt = (newest.ts - oldest.ts) / 1000;   // seconds
-  const dd = oldest.dist - newest.dist;         // positive = approaching (dist decreasing)
+  const dd = oldest.dist - newest.dist;         // positive = approaching
 
-  if (dt <= 0 || dt > 5.0) return { kmh: 0, direction: 'stationary' };
+  if (dt <= 0 || dt > 5.0) {
+    return { kmh: 0, cmPerSec: 0, direction: 'stationary' };
+  }
 
-  // Raw speed from window slope
-  const mmPerSec  = Math.abs(dd) / dt;          // mm/s
-  const kmhRaw    = mmPerSec * 0.0036;          // mm/s × 0.001 m/mm × 3600 s/hr = km/h
+  const mmPerSec = Math.abs(dd) / dt;
+  const cmPerSec = Math.round((mmPerSec / 10) * 10) / 10;
+  const kmhRaw   = mmPerSec * 0.0036 * SPEED_SCALE;
 
-  // Update EMA — always update so it can rise and fall
   if (sensor === 'A') spdEmaA = SPD_ALPHA * kmhRaw + (1 - SPD_ALPHA) * spdEmaA;
   else                spdEmaB = SPD_ALPHA * kmhRaw + (1 - SPD_ALPHA) * spdEmaB;
   const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
 
-  // Noise gate on total displacement (not per-step)
   const totalDisp = Math.abs(dd);
-  const kmh = totalDisp < SPD_NOISE_MM
+  const kmh = (totalDisp < SPD_NOISE_MM || newDist >= 1950)
     ? 0
     : Math.min(Math.round(smoothed * 10) / 10, SPD_DISPLAY_MAX_KMH);
 
   let direction;
-  if (kmh < 1)       direction = 'stationary';
-  else if (dd > 0)   direction = 'approaching';
-  else               direction = 'receding';
+  if (newDist >= 1950)      direction = 'clear';
+  else if (kmh < 0.3)       direction = 'stationary';
+  else if (dd > 0)          direction = 'approaching';
+  else                      direction = 'receding';
 
-  return { kmh, direction };
+  newest.dir = direction;
+  return { kmh, cmPerSec, direction };
 }
 
 // ── Simulator ────────────────────────────────────────────────
@@ -534,8 +553,8 @@ poll();
 //  • Only if sensor stays clear ≥ STALL_CLEAR_GAP_MS
 //    → genuinely reset the stall timer (road is clear)
 function updateClientStall(cA, cB, tA, tB, nowMs) {
-  updateOneSensor('A', cA !== null && cA < tA, nowMs);
-  updateOneSensor('B', cB !== null && cB < tB, nowMs);
+  updateOneSensor('A', cA !== null && cA < tA && cA < 1950, nowMs);
+  updateOneSensor('B', cB !== null && cB < tB && cB < 1950, nowMs);
 
   // Display whichever side has been occupied longer
   const maxStall = Math.max(clientStall.A.sec, clientStall.B.sec);
@@ -589,9 +608,11 @@ function updateOneSensor(sensor, occupied, nowMs) {
 
 // ── KPI update ───────────────────────────────────────────────
 function updateKPI(d, cA, cB, spA, spB) {
-  // Distance
-  document.getElementById('kpiDA').textContent = cA ?? 'OOR';
-  document.getElementById('kpiDB').textContent = cB ?? 'OOR';
+  // Distance — show CLEAR (>2m) instead of OOR
+  document.getElementById('kpiDA').textContent =
+    cA === null ? 'Offline' : cA >= 1950 ? 'CLEAR' : `${cA}`;
+  document.getElementById('kpiDB').textContent =
+    cB === null ? 'Offline' : cB >= 1950 ? 'CLEAR' : `${cB}`;
   document.getElementById('threshADisp').textContent = d.threshA ?? '—';
   document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
   // FW threshold display in panel
@@ -625,34 +646,47 @@ function renderSpeed(sensor, sp, thresh, dist) {
   const kpiEl  = document.getElementById(`kpiSpd${sensor}`);
   const dirEl  = document.getElementById(`spdDir${sensor}`);
   const badgeEl= document.getElementById(`spdBadge${sensor}`);
-  // Show speed whenever sensor has a valid reading (vehicle anywhere in range)
+
   if (!sp || dist === null) {
-    kpiEl.textContent  = '—';
-    dirEl.textContent  = '—';
-    dirEl.style.color  = '#475569';
-    badgeEl.textContent= '— km/h';
-    badgeEl.className  = 'speed-badge spd-stationary';
+    kpiEl.textContent   = '—';
+    dirEl.textContent   = 'Sensor Offline';
+    dirEl.style.color   = '#475569';
+    badgeEl.textContent = '—';
+    badgeEl.className   = 'speed-badge spd-stationary';
     return;
   }
-  // Show 1 decimal for low speeds, integer for higher
+
+  // Lane clear — no vehicle in sensor range
+  if (dist >= 1950) {
+    kpiEl.textContent   = '0.0';
+    dirEl.textContent   = '● Lane Clear';
+    dirEl.style.color   = '#4ade80';
+    badgeEl.textContent = '0.0 km/h';
+    badgeEl.className   = 'speed-badge spd-recede';
+    return;
+  }
+
+  // Vehicle in range — show speed + direction + cm/s
   const display = sp.kmh < 10 ? sp.kmh.toFixed(1) : Math.round(sp.kmh);
   kpiEl.textContent = display;
+
   const dirMap = {
-    approaching: { label: '▼ Approaching', color:'#f87171', cls:'spd-approach'  },
-    receding:    { label: '▲ Receding',    color:'#4ade80', cls:'spd-recede'    },
-    stationary:  { label: '■ Stationary',  color:'#60a5fa', cls:'spd-stationary'},
+    approaching: { label: `▼ Approaching (${sp.cmPerSec} cm/s)`, color:'#f87171', cls:'spd-approach'  },
+    receding:    { label: `▲ Receding    (${sp.cmPerSec} cm/s)`, color:'#4ade80', cls:'spd-recede'    },
+    stationary:  { label: '■ Stationary',                         color:'#60a5fa', cls:'spd-stationary'},
+    clear:       { label: '● Lane Clear',                         color:'#4ade80', cls:'spd-recede'    },
   };
   const dm = dirMap[sp.direction] ?? dirMap.stationary;
-  dirEl.textContent  = dm.label;
-  dirEl.style.color  = dm.color;
-  badgeEl.textContent= `${display} km/h`;
-  badgeEl.className  = `speed-badge ${dm.cls}`;
+  dirEl.textContent   = dm.label;
+  dirEl.style.color   = dm.color;
+  badgeEl.textContent = `${display} km/h`;
+  badgeEl.className   = `speed-badge ${dm.cls}`;
 }
 
 // ── SVG update ───────────────────────────────────────────────
 function updateSVG(d, cA, cB, spA, spB) {
-  const occA = cA !== null && cA < (d.threshA ?? 150);
-  const occB = cB !== null && cB < (d.threshB ?? 150);
+  const occA = cA !== null && cA < (d.threshA ?? 150) && cA < 1950;
+  const occB = cB !== null && cB < (d.threshB ?? 150) && cB < 1950;
   const s    = Math.min(d.state ?? 0, 3);
 
   document.getElementById('vehA').setAttribute('opacity', occA ? '1' : '0');
