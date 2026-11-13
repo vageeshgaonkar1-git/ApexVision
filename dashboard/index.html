@@ -194,7 +194,8 @@
     <p class="text-xs text-slate-400 font-medium mb-1">Speed A</p>
     <p class="kpi-val text-orange-400" id="kpiSpdA">—</p>
     <p class="kpi-unit">km/h</p>
-    <p class="text-xs mt-1" id="spdDirA" style="color:#64748b">—</p>
+    <p class="text-xs font-semibold mt-0.5" id="spdMmsA" style="color:#94a3b8">— mm/s</p>
+    <p class="text-xs mt-0.5" id="spdDirA" style="color:#64748b">—</p>
   </div>
 
   <!-- Speed B -->
@@ -202,7 +203,8 @@
     <p class="text-xs text-slate-400 font-medium mb-1">Speed B</p>
     <p class="kpi-val text-pink-400" id="kpiSpdB">—</p>
     <p class="kpi-unit">km/h</p>
-    <p class="text-xs mt-1" id="spdDirB" style="color:#64748b">—</p>
+    <p class="text-xs font-semibold mt-0.5" id="spdMmsB" style="color:#94a3b8">— mm/s</p>
+    <p class="text-xs mt-0.5" id="spdDirB" style="color:#64748b">—</p>
   </div>
 
 </div>
@@ -644,11 +646,14 @@ function updateKPI(d, cA, cB, spA, spB) {
 
 function renderSpeed(sensor, sp, thresh, dist) {
   const kpiEl  = document.getElementById(`kpiSpd${sensor}`);
+  const mmsEl  = document.getElementById(`spdMms${sensor}`);
   const dirEl  = document.getElementById(`spdDir${sensor}`);
   const badgeEl= document.getElementById(`spdBadge${sensor}`);
 
   if (!sp || dist === null) {
     kpiEl.textContent   = '—';
+    mmsEl.textContent   = '— mm/s';
+    mmsEl.style.color   = '#475569';
     dirEl.textContent   = 'Sensor Offline';
     dirEl.style.color   = '#475569';
     badgeEl.textContent = '—';
@@ -656,9 +661,11 @@ function renderSpeed(sensor, sp, thresh, dist) {
     return;
   }
 
-  // Lane clear — no object in sensor range
+  // No object in sensor range (OOR)
   if (dist >= 1950) {
     kpiEl.textContent   = '0.0';
+    mmsEl.textContent   = '0 mm/s';
+    mmsEl.style.color   = '#4ade80';
     dirEl.textContent   = '● Out of Range';
     dirEl.style.color   = '#4ade80';
     badgeEl.textContent = '0.0 km/h';
@@ -666,20 +673,22 @@ function renderSpeed(sensor, sp, thresh, dist) {
     return;
   }
 
-  // Object in range — show speed + direction + mm/s
-  const display = sp.kmh < 10 ? sp.kmh.toFixed(1) : Math.round(sp.kmh);
-  kpiEl.textContent = display;
-
-  // Convert cm/s back to mm/s for display
+  // Object in range — compute mm/s from cmPerSec
   const mmPerSec = Math.round(sp.cmPerSec * 10);
+  const display  = sp.kmh < 10 ? sp.kmh.toFixed(1) : Math.round(sp.kmh);
+
+  kpiEl.textContent   = display;
+  mmsEl.textContent   = `${mmPerSec} mm/s`;
 
   const dirMap = {
-    approaching: { label: `▼ Approaching  ${mmPerSec} mm/s`, color:'#f87171', cls:'spd-approach'  },
-    receding:    { label: `▲ Receding     ${mmPerSec} mm/s`, color:'#4ade80', cls:'spd-recede'    },
-    stationary:  { label: `■ Stationary   ${mmPerSec} mm/s`, color:'#60a5fa', cls:'spd-stationary'},
-    clear:       { label: '● Out of Range',                   color:'#4ade80', cls:'spd-recede'    },
+    approaching: { label: '▼ Approaching', color:'#f87171', cls:'spd-approach',   mmsColor:'#f87171' },
+    receding:    { label: '▲ Receding',    color:'#4ade80', cls:'spd-recede',     mmsColor:'#4ade80' },
+    stationary:  { label: '■ Stationary',  color:'#60a5fa', cls:'spd-stationary', mmsColor:'#60a5fa' },
+    clear:       { label: '● Out of Range',color:'#4ade80', cls:'spd-recede',     mmsColor:'#4ade80' },
   };
   const dm = dirMap[sp.direction] ?? dirMap.stationary;
+
+  mmsEl.style.color   = dm.mmsColor;
   dirEl.textContent   = dm.label;
   dirEl.style.color   = dm.color;
   badgeEl.textContent = `${display} km/h`;
