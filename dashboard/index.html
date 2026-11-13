@@ -608,11 +608,11 @@ function updateOneSensor(sensor, occupied, nowMs) {
 
 // ── KPI update ───────────────────────────────────────────────
 function updateKPI(d, cA, cB, spA, spB) {
-  // Distance — show CLEAR (>2m) instead of OOR
+  // Distance — show OOR when no object in range (≥ 2000 mm)
   document.getElementById('kpiDA').textContent =
-    cA === null ? 'Offline' : cA >= 1950 ? 'CLEAR' : `${cA}`;
+    cA === null ? 'Offline' : cA >= 1950 ? 'OOR' : `${cA}`;
   document.getElementById('kpiDB').textContent =
-    cB === null ? 'Offline' : cB >= 1950 ? 'CLEAR' : `${cB}`;
+    cB === null ? 'Offline' : cB >= 1950 ? 'OOR' : `${cB}`;
   document.getElementById('threshADisp').textContent = d.threshA ?? '—';
   document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
   // FW threshold display in panel
@@ -656,25 +656,28 @@ function renderSpeed(sensor, sp, thresh, dist) {
     return;
   }
 
-  // Lane clear — no vehicle in sensor range
+  // Lane clear — no object in sensor range
   if (dist >= 1950) {
     kpiEl.textContent   = '0.0';
-    dirEl.textContent   = '● Lane Clear';
+    dirEl.textContent   = '● Out of Range';
     dirEl.style.color   = '#4ade80';
     badgeEl.textContent = '0.0 km/h';
     badgeEl.className   = 'speed-badge spd-recede';
     return;
   }
 
-  // Vehicle in range — show speed + direction + cm/s
+  // Object in range — show speed + direction + mm/s
   const display = sp.kmh < 10 ? sp.kmh.toFixed(1) : Math.round(sp.kmh);
   kpiEl.textContent = display;
 
+  // Convert cm/s back to mm/s for display
+  const mmPerSec = Math.round(sp.cmPerSec * 10);
+
   const dirMap = {
-    approaching: { label: `▼ Approaching (${sp.cmPerSec} cm/s)`, color:'#f87171', cls:'spd-approach'  },
-    receding:    { label: `▲ Receding    (${sp.cmPerSec} cm/s)`, color:'#4ade80', cls:'spd-recede'    },
-    stationary:  { label: '■ Stationary',                         color:'#60a5fa', cls:'spd-stationary'},
-    clear:       { label: '● Lane Clear',                         color:'#4ade80', cls:'spd-recede'    },
+    approaching: { label: `▼ Approaching  ${mmPerSec} mm/s`, color:'#f87171', cls:'spd-approach'  },
+    receding:    { label: `▲ Receding     ${mmPerSec} mm/s`, color:'#4ade80', cls:'spd-recede'    },
+    stationary:  { label: `■ Stationary   ${mmPerSec} mm/s`, color:'#60a5fa', cls:'spd-stationary'},
+    clear:       { label: '● Out of Range',                   color:'#4ade80', cls:'spd-recede'    },
   };
   const dm = dirMap[sp.direction] ?? dirMap.stationary;
   dirEl.textContent   = dm.label;
