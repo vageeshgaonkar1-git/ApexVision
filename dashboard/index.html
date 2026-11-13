@@ -38,6 +38,15 @@
     .lane  { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 12 8; }
     .vehicle { transition: cx 0.4s, cy 0.4s; }
 
+    /* ── Chart container: MUST have explicit height so Chart.js
+          responsive mode doesn't cause infinite growth ── */
+    .chart-box { position: relative; width: 100%; }
+    .chart-box-tall  { height: 240px; }
+    .chart-box-short { height: 170px; }
+
+    /* SVG card fixed height to match chart row */
+    .svg-card { height: 320px; }
+
     /* Slider style */
     input[type=range] { accent-color: var(--accent); width:100%; }
 
@@ -138,7 +147,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
 
   <!-- SVG Hairpin Digital Twin -->
-  <div class="card flex flex-col items-center">
+  <div class="card flex flex-col items-center svg-card">
     <p class="text-xs text-slate-400 mb-2 self-start">Hairpin Digital Twin</p>
     <svg id="hairpinSvg" viewBox="0 0 220 260" width="220" height="260">
       <!-- Road outline hairpin -->
@@ -179,13 +188,13 @@
   <!-- Live ToF Chart -->
   <div class="card">
     <p class="text-xs text-slate-400 mb-2">Live ToF Stream (mm)</p>
-    <canvas id="chartTof" height="230"></canvas>
+    <div class="chart-box chart-box-tall"><canvas id="chartTof"></canvas></div>
   </div>
 
   <!-- Hourly Traffic / Conflicts -->
   <div class="card">
     <p class="text-xs text-slate-400 mb-2">Hourly Traffic &amp; Conflicts</p>
-    <canvas id="chartHourly" height="230"></canvas>
+    <div class="chart-box chart-box-tall"><canvas id="chartHourly"></canvas></div>
   </div>
 
 </div>
@@ -198,7 +207,7 @@
   <!-- 24h Solar SoC -->
   <div class="card">
     <p class="text-xs text-slate-400 mb-2">24-Hour Solar / Li-ion SoC (%)</p>
-    <canvas id="chartSoc" height="160"></canvas>
+    <div class="chart-box chart-box-short"><canvas id="chartSoc"></canvas></div>
   </div>
 
   <!-- Remote Regulation Panel -->
