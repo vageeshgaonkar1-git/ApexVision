@@ -111,7 +111,34 @@ const char* WIFI_PASSWORD = "YourPassword";
 
 ---
 
-## Boot Calibration
+## Firmware Architecture
+
+### Core Assignment (FreeRTOS)
+
+| Core | Task | Why |
+|------|------|-----|
+| **Core 1** (Arduino `loop()`) | ToF reads, EMA, state machine, LED blinking | Real-time — must never stall |
+| **Core 0** (`firebaseTask`) | HTTPS PUT telemetry + GET config | Network I/O — TLS handshakes can take 200–1500 ms |
+
+This prevents Wi-Fi/TLS hiccups from causing LED blink stutter or delayed sensor reads. Data is exchanged between cores via two FreeRTOS mutexes (`telemMutex`, `configMutex`).
+
+`http.setReuse(true)` keeps the TCP connection alive between PUT and GET calls, avoiding a full TLS handshake on every request.
+
+### I2C Reliability
+
+`Wire.setTimeOut(50)` is set in `setup()`. If the I2C bus locks up (long wires, noise), the Wire library resets automatically within 50 ms instead of hanging indefinitely.
+
+If a sensor fails mid-operation (`sensorA_ok` or `sensorB_ok` goes false), the firmware automatically attempts recovery every 5 seconds by toggling the XSHUT pin and re-initialising — no manual reset needed.
+
+### ECO_SLEEP True Low-Power
+
+When `modeOverride = "ECO_SLEEP"` is received:
+- WiFi radio is disabled (`WiFi.disconnect(true)`) — saves 80–240 mA
+- ESP32 enters light sleep for 1 second (`esp_light_sleep_start()`)
+- WiFi reconnects after waking
+- LEDs are turned off
+
+
 
 On power-up the ESP32 samples 15 readings from each sensor on an **empty track** and sets:
 
@@ -218,6 +245,7 @@ The stall timer display shows minutes and seconds (e.g. `Stall: 1m 45s`) once it
 | Remote Regulation | Threshold sliders, mode override, stall timeout, Auto-Tare |
 | Incident log | State-change log with speed, stall time, CSV export |
 | Simulator mode | Built-in offline simulator for testing without hardware |
+| Stale-node watchdog | Status badge switches to ⚠ Node Offline / Stale if `uptimeSec` stops incrementing for 4 s — prevents showing stale cached Firebase data as "Live" |
 
 ---
 
