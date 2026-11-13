@@ -13,18 +13,14 @@
       --card:   #1e293b;
       --border: #334155;
     }
-
-    * { box-sizing: border-box; }
-
+    *, *::before, *::after { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0;
-      height: 100%;
       background: var(--bg);
       color: #e2e8f0;
       font-family: 'Inter', ui-sans-serif, sans-serif;
       overflow-x: hidden;
     }
-
     .card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -33,13 +29,13 @@
     }
 
     /* ── KPI ── */
-    .kpi-val  { font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -1px; }
-    .kpi-unit { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+    .kpi-val  { font-size: 2.2rem; font-weight: 800; line-height: 1; letter-spacing: -1px; }
+    .kpi-unit { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
 
     /* ── State badge ── */
     .badge {
       display: inline-block;
-      font-size: 0.75rem; font-weight: 700;
+      font-size: 0.72rem; font-weight: 700;
       padding: 3px 12px; border-radius: 999px;
       text-transform: uppercase; letter-spacing: 0.05em;
     }
@@ -48,44 +44,104 @@
     .badge-2 { background:#7f1d1d; color:#fecaca; }
     .badge-3 { background:#1e1b4b; color:#e9d5ff; animation: flashBg 0.5s infinite alternate; }
 
-    /* ── Emergency banner ── */
-    #emergencyBanner {
+    /* ── Range bar ── */
+    .rbar-bg   { background:#0f172a; border-radius:999px; overflow:hidden; height:8px; margin: 6px 4px 0; }
+    .rbar-fill { height:100%; border-radius:999px; transition:width 0.3s, background 0.3s; }
+
+    /* ── Chart wrapper — fixed height stops Chart.js infinite resize ── */
+    .chart-wrap { position: relative; width: 100%; height: 260px; }
+
+    /* ── SVG hairpin ── */
+    .road { fill:none; stroke-linecap:round; }
+    .lane { fill:none; stroke:#94a3b8; stroke-width:2; stroke-dasharray:12 8; }
+
+    /* ── Speed badge ── */
+    .speed-badge {
+      font-size: 0.65rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 999px;
+      display: inline-block;
+    }
+    .spd-approach  { background:#7f1d1d; color:#fca5a5; }
+    .spd-recede    { background:#14532d; color:#86efac; }
+    .spd-stationary{ background:#1e3a5f; color:#93c5fd; }
+
+    /* ── EMERGENCY OVERLAY ── */
+    #emergencyOverlay {
       display: none;
-      animation: flashBg 0.4s infinite alternate;
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.75);
+      align-items: center; justify-content: center;
+    }
+    #emergencyOverlay.show { display: flex; }
+    #emergencyBox {
+      border: 3px solid #ef4444;
+      border-radius: 1rem;
+      padding: 2rem 2.5rem;
+      max-width: 500px; width: 90%;
+      text-align: center;
+      animation: flashBorder 0.5s infinite alternate;
+    }
+    @keyframes flashBorder {
+      from { border-color: #ef4444; background: #1a0a0a; }
+      to   { border-color: #fca5a5; background: #2d0f0f; }
     }
     @keyframes flashBg {
       from { background-color: #7f1d1d; }
       to   { background-color: #dc2626; }
     }
 
-    /* ── Chart wrapper — FIXED height prevents Chart.js infinite resize ── */
-    .chart-wrap { position: relative; width: 100%; height: 260px; }
-
-    /* ── SVG hairpin ── */
-    .road   { fill: none; stroke-linecap: round; }
-    .lane   { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 12 8; }
-
-    /* ── Range bar ── */
-    .range-bar-bg   { background: #0f172a; border-radius: 999px; overflow: hidden; height: 10px; }
-    .range-bar-fill { height: 100%; border-radius: 999px; transition: width 0.3s; }
-
-    /* ── Remote panel ── */
-    input[type=range] { accent-color: var(--accent); width: 100%; }
+    /* ── Remote panel inputs ── */
+    input[type=range] { accent-color: var(--accent); width: 100%; cursor: pointer; }
+    select, input[type=number] {
+      background: #0f172a; border: 1px solid var(--border);
+      color: #e2e8f0; border-radius: 0.4rem;
+      padding: 4px 8px; font-size: 0.75rem; width: 100%;
+    }
+    select:focus, input:focus { outline: 1px solid var(--accent); }
 
     /* ── Log table ── */
-    #logBody tr:nth-child(even) td { background: #162032; }
-    #logBody td, #logBody th      { padding: 4px 8px; font-size: 0.72rem; white-space: nowrap; }
+    #logBody tr:nth-child(even) td { background:#162032; }
+    #logBody td { padding: 3px 8px; font-size: 0.7rem; white-space: nowrap; }
+    thead th   { padding: 4px 8px; font-size: 0.7rem; white-space: nowrap; }
   </style>
 </head>
 
-<body class="p-4 pb-8">
+<body class="p-4 pb-10">
 
-<!-- ══════════════════════════════════════════════════════
+<!-- ══════════════════════════════════════════
+     EMERGENCY OVERLAY  (State 3 — stall hazard)
+══════════════════════════════════════════ -->
+<div id="emergencyOverlay">
+  <div id="emergencyBox" class="text-white">
+    <div class="text-4xl mb-3">🚨</div>
+    <h2 class="text-xl font-black tracking-widest mb-1">VEHICLE STALLED</h2>
+    <p class="text-sm text-red-300 mb-1">HAZARD ACTIVE — BLIND CURVE BLOCKED</p>
+    <p class="text-2xl font-bold text-yellow-300 my-3" id="overlayStall">0 s</p>
+    <div class="flex gap-2 justify-center flex-wrap mt-4">
+      <button onclick="lockRedClosure()"
+        class="px-4 py-2 bg-white text-red-700 font-black rounded-lg text-sm hover:bg-red-50 transition">
+        🔒 Lock Closure
+      </button>
+      <button onclick="dispatchPatrol()"
+        class="px-4 py-2 bg-yellow-400 text-black font-black rounded-lg text-sm hover:bg-yellow-300 transition">
+        🚔 Dispatch Patrol
+      </button>
+      <button onclick="clearEmergency()"
+        class="px-4 py-2 bg-green-500 text-white font-black rounded-lg text-sm hover:bg-green-400 transition">
+        ✔ Clear Alert
+      </button>
+    </div>
+    <p class="text-xs text-slate-500 mt-4">Alert will re-appear if hazard persists</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      HEADER
-══════════════════════════════════════════════════════ -->
+══════════════════════════════════════════ -->
 <header class="flex items-center justify-between mb-5">
   <div class="flex items-center gap-3">
-    <div class="w-9 h-9 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-xl">👁</div>
+    <div class="w-9 h-9 rounded-full bg-orange-500/10 border border-orange-500/30
+                flex items-center justify-center text-xl select-none">👁</div>
     <div>
       <h1 class="text-lg font-extrabold text-orange-400 leading-none tracking-tight">ApexVision</h1>
       <p class="text-xs text-slate-500 mt-0.5">Blind-Curve Hazard Warning Monitor</p>
@@ -101,107 +157,91 @@
   </div>
 </header>
 
-<!-- ══════════════════════════════════════════════════════
-     EMERGENCY BANNER  (State 3 — vehicle stalled)
-══════════════════════════════════════════════════════ -->
-<div id="emergencyBanner" class="rounded-xl p-4 mb-5 text-white">
-  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-    <div>
-      <p class="text-base font-black tracking-widest">⚠ VEHICLE STALLED — HAZARD ACTIVE</p>
-      <p class="text-xs opacity-75 mt-0.5" id="stallTimerBanner">Stall: 0 s</p>
-    </div>
-    <div class="flex gap-2 flex-wrap">
-      <button onclick="lockRedClosure()"
-        class="px-3 py-1.5 bg-white text-red-700 font-bold rounded-lg text-xs hover:bg-red-50 transition">
-        🔒 Lock Closure
-      </button>
-      <button onclick="dispatchPatrol()"
-        class="px-3 py-1.5 bg-yellow-300 text-black font-bold rounded-lg text-xs hover:bg-yellow-200 transition">
-        🚔 Dispatch Patrol
-      </button>
-      <button onclick="clearEmergency()"
-        class="px-3 py-1.5 bg-green-400 text-black font-bold rounded-lg text-xs hover:bg-green-300 transition">
-        ✔ Clear
-      </button>
-    </div>
-  </div>
-</div>
+<!-- ══════════════════════════════════════════
+     KPI ROW — 5 cards
+══════════════════════════════════════════ -->
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
 
-<!-- ══════════════════════════════════════════════════════
-     KPI ROW  (3 cards)
-══════════════════════════════════════════════════════ -->
-<div class="grid grid-cols-3 gap-3 mb-5">
-
-  <!-- Sensor A -->
+  <!-- Sensor A distance -->
   <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-2 font-medium">Sensor A</p>
+    <p class="text-xs text-slate-400 font-medium mb-1">Sensor A</p>
     <p class="kpi-val text-cyan-400" id="kpiDA">—</p>
     <p class="kpi-unit">mm</p>
-    <!-- range bar: 30–2000 mm -->
-    <div class="range-bar-bg mt-3 mx-2">
-      <div id="barA" class="range-bar-fill bg-cyan-500" style="width:0%"></div>
-    </div>
+    <div class="rbar-bg"><div id="barA" class="rbar-fill" style="width:0%;background:#22d3ee"></div></div>
     <p class="text-xs text-slate-500 mt-1">thresh <span id="threshADisp">—</span> mm</p>
+    <div class="mt-1"><span id="spdBadgeA" class="speed-badge spd-stationary">— km/h</span></div>
   </div>
 
-  <!-- Sensor B -->
+  <!-- Sensor B distance -->
   <div class="card text-center">
-    <p class="text-xs text-slate-400 mb-2 font-medium">Sensor B</p>
+    <p class="text-xs text-slate-400 font-medium mb-1">Sensor B</p>
     <p class="kpi-val text-teal-400" id="kpiDB">—</p>
     <p class="kpi-unit">mm</p>
-    <div class="range-bar-bg mt-3 mx-2">
-      <div id="barB" class="range-bar-fill bg-teal-500" style="width:0%"></div>
-    </div>
+    <div class="rbar-bg"><div id="barB" class="rbar-fill" style="width:0%;background:#2dd4bf"></div></div>
     <p class="text-xs text-slate-500 mt-1">thresh <span id="threshBDisp">—</span> mm</p>
+    <div class="mt-1"><span id="spdBadgeB" class="speed-badge spd-stationary">— km/h</span></div>
   </div>
 
   <!-- System State -->
-  <div class="card text-center flex flex-col items-center justify-center gap-2">
+  <div class="card text-center flex flex-col items-center justify-center gap-1.5">
     <p class="text-xs text-slate-400 font-medium">System State</p>
     <span id="stateBadge" class="badge badge-0">CLEAR</span>
     <p class="text-xs text-slate-500" id="kpiStall">Stall: 0.0 s</p>
-    <p class="text-xs text-slate-600" id="kpiUptime">up 0 s</p>
+  </div>
+
+  <!-- Speed A -->
+  <div class="card text-center">
+    <p class="text-xs text-slate-400 font-medium mb-1">Speed A</p>
+    <p class="kpi-val text-orange-400" id="kpiSpdA">—</p>
+    <p class="kpi-unit">km/h</p>
+    <p class="text-xs mt-1" id="spdDirA" style="color:#64748b">—</p>
+  </div>
+
+  <!-- Speed B -->
+  <div class="card text-center">
+    <p class="text-xs text-slate-400 font-medium mb-1">Speed B</p>
+    <p class="kpi-val text-pink-400" id="kpiSpdB">—</p>
+    <p class="kpi-unit">km/h</p>
+    <p class="text-xs mt-1" id="spdDirB" style="color:#64748b">—</p>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════════════════════
-     SVG TWIN  +  LIVE ToF CHART  (side by side)
-══════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════
+     SVG TWIN  +  LIVE ToF CHART
+══════════════════════════════════════════ -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
 
   <!-- SVG Hairpin Digital Twin -->
   <div class="card flex flex-col">
     <p class="text-xs text-slate-400 font-medium mb-3">Hairpin Digital Twin</p>
     <div class="flex-1 flex flex-col items-center justify-center">
-      <svg viewBox="0 0 260 300" width="100%" style="max-width:280px; max-height:280px">
-        <!-- Road shadow -->
+      <svg viewBox="0 0 260 300" width="100%" style="max-width:280px;max-height:280px">
         <path class="road" stroke="#1e293b" stroke-width="44"
           d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
-        <!-- Road surface -->
         <path class="road" stroke="#334155" stroke-width="34"
           d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
-        <!-- Centre dashes -->
         <path class="lane"
           d="M130,285 C130,285 35,260 35,150 C35,65 85,25 130,25 C175,25 225,65 225,150 C225,260 130,285 130,285"/>
-
-        <!-- Sensor A — left approach -->
+        <!-- Sensor A -->
         <circle id="dotA" cx="40" cy="268" r="7" fill="#22d3ee"/>
         <text x="6" y="285" font-size="10" fill="#22d3ee" font-weight="bold">A</text>
         <line id="beamA" x1="40" y1="265" x2="90" y2="235"
           stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="5 4" opacity="0.9"/>
-
-        <!-- Sensor B — right approach -->
+        <!-- Sensor B -->
         <circle id="dotB" cx="220" cy="268" r="7" fill="#2dd4bf"/>
         <text x="232" y="285" font-size="10" fill="#2dd4bf" font-weight="bold">B</text>
         <line id="beamB" x1="220" y1="265" x2="170" y2="235"
           stroke="#2dd4bf" stroke-width="2.5" stroke-dasharray="5 4" opacity="0.9"/>
-
-        <!-- Vehicle markers (shown when occupied) -->
+        <!-- Vehicles -->
         <circle id="vehA" cx="55"  cy="260" r="11" fill="#f97316" opacity="0"/>
         <circle id="vehB" cx="205" cy="260" r="11" fill="#ef4444"  opacity="0"/>
-
-        <!-- State label in centre -->
+        <!-- Speed labels on SVG -->
+        <text id="svgSpdA" x="40" y="250" text-anchor="middle"
+          font-size="8" fill="#f97316" font-weight="bold" opacity="0"></text>
+        <text id="svgSpdB" x="220" y="250" text-anchor="middle"
+          font-size="8" fill="#ef4444"  font-weight="bold" opacity="0"></text>
+        <!-- State label -->
         <text id="svgLabel" x="130" y="158" text-anchor="middle"
           font-size="13" fill="#94a3b8" font-weight="bold" letter-spacing="1">CLEAR</text>
       </svg>
@@ -216,28 +256,27 @@
   <!-- Live ToF Chart -->
   <div class="card flex flex-col">
     <p class="text-xs text-slate-400 font-medium mb-3">Live Distance Stream (mm)</p>
-    <div class="chart-wrap flex-1">
+    <div class="chart-wrap">
       <canvas id="chartTof"></canvas>
     </div>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════════════════════
-     REMOTE REGULATION PANEL  +  INCIDENT LOG
-══════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════
+     REMOTE REGULATION  +  INCIDENT LOG
+══════════════════════════════════════════ -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
 
   <!-- Remote Panel -->
   <div class="card">
     <p class="text-xs text-orange-400 font-bold mb-4">⚙ Remote Regulation</p>
-    <div class="space-y-4 text-xs text-slate-300">
+    <div class="space-y-3 text-xs text-slate-300">
 
       <!-- Mode Override -->
       <div>
         <label class="block text-slate-400 mb-1">Mode Override</label>
-        <select id="modeSelect"
-          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-orange-500">
+        <select id="modeSelect">
           <option value="NONE">NONE — Auto</option>
           <option value="FORCE_RED_STOP">FORCE_RED_STOP</option>
           <option value="FORCE_YELLOW_CAUTION">FORCE_YELLOW_CAUTION</option>
@@ -245,29 +284,50 @@
         </select>
       </div>
 
+      <!-- Threshold A -->
+      <div>
+        <div class="flex justify-between mb-1">
+          <label class="text-slate-400">Threshold A</label>
+          <span class="text-white font-bold"><span id="threshAVal">150</span> mm</span>
+        </div>
+        <input type="range" id="threshASlider" min="100" max="900" value="150"
+          oninput="document.getElementById('threshAVal').textContent=this.value" />
+        <p class="text-slate-600 mt-0.5">Range: 100 – 900 mm · Current firmware: <span id="threshAFW">—</span> mm</p>
+      </div>
+
+      <!-- Threshold B -->
+      <div>
+        <div class="flex justify-between mb-1">
+          <label class="text-slate-400">Threshold B</label>
+          <span class="text-white font-bold"><span id="threshBVal">150</span> mm</span>
+        </div>
+        <input type="range" id="threshBSlider" min="100" max="900" value="150"
+          oninput="document.getElementById('threshBVal').textContent=this.value" />
+        <p class="text-slate-600 mt-0.5">Range: 100 – 900 mm · Current firmware: <span id="threshBFW">—</span> mm</p>
+      </div>
+
       <!-- Stall Timeout -->
       <div>
-        <label class="block text-slate-400 mb-1">
-          Stall Timeout: <span id="stallVal" class="text-white font-bold">5</span> s
-        </label>
+        <div class="flex justify-between mb-1">
+          <label class="text-slate-400">Stall Timeout</label>
+          <span class="text-white font-bold"><span id="stallVal">5</span> s</span>
+        </div>
         <input type="range" id="stallSlider" min="2" max="30" value="5"
           oninput="document.getElementById('stallVal').textContent=this.value" />
       </div>
 
-      <!-- Action buttons -->
+      <!-- Buttons -->
       <div class="flex gap-2 pt-1 flex-wrap">
         <button onclick="pushConfig()"
           class="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg text-xs transition">
-          Apply
+          Apply to ESP32
         </button>
         <button onclick="remoteTare()"
           class="px-4 py-1.5 bg-slate-600 hover:bg-slate-500 text-white font-bold rounded-lg text-xs transition">
           🔄 Auto-Tare
         </button>
       </div>
-
-      <!-- Status feedback -->
-      <p id="configFeedback" class="text-slate-500 text-xs italic"></p>
+      <p id="configFeedback" class="text-slate-500 italic text-xs"></p>
     </div>
   </div>
 
@@ -280,16 +340,12 @@
         ⬇ Export CSV
       </button>
     </div>
-    <div class="overflow-y-auto" style="max-height:220px">
+    <div class="overflow-y-auto flex-1" style="max-height:240px">
       <table class="w-full text-left border-collapse">
-        <thead>
-          <tr class="text-slate-400 border-b border-slate-700 text-xs">
-            <th class="pb-1 px-2">Time</th>
-            <th class="pb-1 px-2">State</th>
-            <th class="pb-1 px-2">A mm</th>
-            <th class="pb-1 px-2">B mm</th>
-            <th class="pb-1 px-2">Stall</th>
-            <th class="pb-1 px-2">Note</th>
+        <thead class="sticky top-0 bg-slate-800">
+          <tr class="text-slate-400 border-b border-slate-700">
+            <th>Time</th><th>State</th><th>A mm</th><th>B mm</th>
+            <th>Spd A</th><th>Spd B</th><th>Stall</th><th>Note</th>
           </tr>
         </thead>
         <tbody id="logBody"></tbody>
@@ -299,144 +355,229 @@
 
 </div>
 
-<!-- ══════════════════════════════════════════════════════
+<!-- ══════════════════════════════════════════
      JAVASCRIPT
-══════════════════════════════════════════════════════ -->
+══════════════════════════════════════════ -->
 <script>
-// ── Firebase ──────────────────────────────────────────
-const FB_BASE    = 'https://apexvision-8f1e4-default-rtdb.asia-southeast1.firebasedatabase.app';
-const NODE       = 'node_01';
-const TELEM_URL  = `${FB_BASE}/nodes/${NODE}/telemetry.json`;
-const CONFIG_URL = `${FB_BASE}/nodes/${NODE}/config.json`;
+// ── Firebase ─────────────────────────────────────────────────
+const FB_BASE   = 'https://apexvision-8f1e4-default-rtdb.asia-southeast1.firebasedatabase.app';
+const NODE      = 'node_01';
+const TELEM_URL = `${FB_BASE}/nodes/${NODE}/telemetry.json`;
+const CONFIG_URL= `${FB_BASE}/nodes/${NODE}/config.json`;
 
-// ── Sensor valid range (VL53L0X spec) ─────────────────
-const TOF_MIN = 30;    // mm
-const TOF_MAX = 2000;  // mm
+// ── Sensor valid range (VL53L0X) ─────────────────────────────
+const TOF_MIN = 30;
+const TOF_MAX = 2000;
 
-// ── App state ─────────────────────────────────────────
+// ── Speed estimator state ────────────────────────────────────
+// We keep the last valid reading + its timestamp per sensor
+const prevReading = { A: null, B: null };   // { dist, ts }
+const SPD_ALPHA   = 0.4;   // EMA weight on new speed estimate
+let   spdEmaA     = 0;
+let   spdEmaB     = 0;
+// Min distance change to trust the estimate (filters noise)
+const SPD_NOISE_MM = 15;
+// Speed is only shown when vehicle is in range
+const SPD_DISPLAY_MAX_KMH = 120;
+
+// ── App state ────────────────────────────────────────────────
 let isSimMode   = false;
 let incidentLog = [];
 let lastState   = -1;
 let simT        = 0;
 let bootTs      = Date.now();
+let alertDismissed = false;  // user dismissed this stall event
 
 const STATE_LABELS = ['CLEAR', 'ONE-SIDE', 'BOTH-OCC', 'STALL ⚠'];
-const STATE_BADGE  = ['badge-0', 'badge-1', 'badge-2', 'badge-3'];
-const STATE_COLORS = ['#22c55e', '#eab308', '#ef4444', '#a855f7'];
+const STATE_COLORS = ['#22c55e','#eab308','#ef4444','#a855f7'];
 
-// ── Clamp to valid sensor range ────────────────────────
+// ── Clamp to VL53L0X valid range ─────────────────────────────
 function clampTof(v) {
-  if (typeof v !== 'number' || isNaN(v)) return null;
-  if (v < TOF_MIN || v > TOF_MAX) return null;  // out-of-range → null (not plotted)
+  if (typeof v !== 'number' || isNaN(v) || v < TOF_MIN || v > TOF_MAX) return null;
   return v;
 }
 
-// ── Simulator ─────────────────────────────────────────
+// ── Speed estimation ─────────────────────────────────────────
+// Returns { kmh, direction } or null if not enough data
+function estimateSpeed(sensor, newDist, nowMs) {
+  const prev = prevReading[sensor];
+  if (newDist === null) {
+    prevReading[sensor] = null;
+    return null;
+  }
+  const result = { kmh: 0, direction: 'stationary' };
+  if (prev && prev.dist !== null) {
+    const dt = (nowMs - prev.ts) / 1000;   // seconds
+    if (dt > 0 && dt < 3.0) {              // ignore stale readings
+      const dd = prev.dist - newDist;      // positive = approaching
+      if (Math.abs(dd) >= SPD_NOISE_MM) {
+        const mmPerSec = Math.abs(dd) / dt;
+        const kmh      = mmPerSec * 0.0036;  // mm/s → km/h
+        // EMA smoothing
+        const emaKey = sensor === 'A' ? 'spdEmaA' : 'spdEmaB';
+        if (sensor === 'A') spdEmaA = SPD_ALPHA * kmh + (1 - SPD_ALPHA) * spdEmaA;
+        else                spdEmaB = SPD_ALPHA * kmh + (1 - SPD_ALPHA) * spdEmaB;
+        const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
+        result.kmh = Math.min(Math.round(smoothed), SPD_DISPLAY_MAX_KMH);
+        result.direction = dd > 0 ? 'approaching' : 'receding';
+      } else {
+        // Small change — use previous EMA, classify stationary
+        const smoothed = sensor === 'A' ? spdEmaA : spdEmaB;
+        result.kmh = Math.round(smoothed);
+        result.direction = smoothed < 1 ? 'stationary' : 'slow';
+      }
+    }
+  }
+  prevReading[sensor] = { dist: newDist, ts: nowMs };
+  return result;
+}
+
+// ── Simulator ────────────────────────────────────────────────
 function simTelemetry() {
   simT += 0.12;
-  const rawA = 500 + 400 * Math.sin(simT * 0.6);
-  const rawB = 550 + 350 * Math.cos(simT * 0.45);
-  const threshA = 500, threshB = 500;
+  const rawA = 500 + 450 * Math.sin(simT * 0.55);
+  const rawB = 600 + 380 * Math.cos(simT * 0.4);
+  const threshA = 150, threshB = 150;
   const occA = rawA < threshA, occB = rawB < threshB;
   let state = 0;
   if (occA && occB) state = 2;
   else if (occA || occB) state = 1;
   return {
     dA: Math.round(rawA), dB: Math.round(rawB),
-    threshA, threshB,
-    state,
-    stallSec: 0,
+    threshA, threshB, state, stallSec: 0,
     modeOverride: 'NONE',
-    rssi: -58 + Math.round(8 * Math.sin(simT)),
-    uptimeSec: Math.round((Date.now() - bootTs) / 1000),
+    rssi: -58, uptimeSec: Math.round((Date.now() - bootTs) / 1000),
     sensorA_ok: true, sensorB_ok: true
   };
 }
 
-// ── Fetch telemetry ───────────────────────────────────
+// ── Fetch ────────────────────────────────────────────────────
 async function fetchTelemetry() {
   if (isSimMode) return simTelemetry();
   try {
     const r = await fetch(TELEM_URL, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     return await r.json();
-  } catch {
-    setConn(false);
-    return null;
-  }
+  } catch { setConn(false); return null; }
 }
 
-// ── Main poll loop (500 ms) ───────────────────────────
+// ── Main poll (500 ms) ────────────────────────────────────────
 async function poll() {
   const d = await fetchTelemetry();
   if (!d) return;
   setConn(true);
-  updateKPI(d);
-  updateSVG(d);
-  updateChart(d);
+  const now = Date.now();
+  const cA  = clampTof(d.dA);
+  const cB  = clampTof(d.dB);
+  const spA = estimateSpeed('A', cA, now);
+  const spB = estimateSpeed('B', cB, now);
+  updateKPI(d, cA, cB, spA, spB);
+  updateSVG(d, cA, cB, spA, spB);
+  updateChart(cA, cB);
   checkEmergency(d);
-  trackIncident(d);
+  trackIncident(d, spA, spB);
+  // Sync threshold sliders to firmware values (only if user hasn't touched them)
+  syncSliders(d);
 }
 setInterval(poll, 500);
 poll();
 
-// ── KPI Cards ─────────────────────────────────────────
-function updateKPI(d) {
-  const cA = clampTof(d.dA);
-  const cB = clampTof(d.dB);
-
-  // Sensor A
-  document.getElementById('kpiDA').textContent = cA !== null ? cA : 'OOR';
+// ── KPI update ───────────────────────────────────────────────
+function updateKPI(d, cA, cB, spA, spB) {
+  // Distance
+  document.getElementById('kpiDA').textContent = cA ?? 'OOR';
+  document.getElementById('kpiDB').textContent = cB ?? 'OOR';
   document.getElementById('threshADisp').textContent = d.threshA ?? '—';
-  const pctA = cA !== null ? Math.round(((cA - TOF_MIN) / (TOF_MAX - TOF_MIN)) * 100) : 0;
-  document.getElementById('barA').style.width = pctA + '%';
-  // Turn bar red when below threshold
-  document.getElementById('barA').style.background =
-    (cA !== null && cA < (d.threshA ?? 500)) ? '#ef4444' : '#22d3ee';
-
-  // Sensor B
-  document.getElementById('kpiDB').textContent = cB !== null ? cB : 'OOR';
   document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
-  const pctB = cB !== null ? Math.round(((cB - TOF_MIN) / (TOF_MAX - TOF_MIN)) * 100) : 0;
-  document.getElementById('barB').style.width = pctB + '%';
-  document.getElementById('barB').style.background =
-    (cB !== null && cB < (d.threshB ?? 500)) ? '#ef4444' : '#2dd4bf';
+  // FW threshold display in panel
+  document.getElementById('threshAFW').textContent = d.threshA ?? '—';
+  document.getElementById('threshBFW').textContent = d.threshB ?? '—';
+
+  // Range bars
+  const pA = cA ? Math.round(((cA - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
+  const pB = cB ? Math.round(((cB - TOF_MIN)/(TOF_MAX - TOF_MIN))*100) : 0;
+  const bA = document.getElementById('barA');
+  const bB = document.getElementById('barB');
+  bA.style.width = pA + '%';
+  bB.style.width = pB + '%';
+  bA.style.background = (cA && cA < (d.threshA??150)) ? '#ef4444' : '#22d3ee';
+  bB.style.background = (cB && cB < (d.threshB??150)) ? '#ef4444' : '#2dd4bf';
+
+  // Speed KPIs
+  renderSpeed('A', spA, d.threshA ?? 150, cA);
+  renderSpeed('B', spB, d.threshB ?? 150, cB);
 
   // State badge
-  const badge = document.getElementById('stateBadge');
   const s = Math.min(d.state ?? 0, 3);
+  const badge = document.getElementById('stateBadge');
   badge.className = 'badge badge-' + s;
   badge.textContent = STATE_LABELS[s];
-
-  // Stall / uptime
-  document.getElementById('kpiStall').textContent =
-    `Stall: ${(d.stallSec ?? 0).toFixed(1)} s`;
-  document.getElementById('kpiUptime').textContent =
-    `up ${d.uptimeSec ?? 0} s`;
-
+  document.getElementById('kpiStall').textContent = `Stall: ${(d.stallSec??0).toFixed(1)} s`;
   document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
 }
 
-// ── SVG Digital Twin ──────────────────────────────────
-function updateSVG(d) {
-  const occA = (clampTof(d.dA) ?? 9999) < (d.threshA ?? 500);
-  const occB = (clampTof(d.dB) ?? 9999) < (d.threshB ?? 500);
+function renderSpeed(sensor, sp, thresh, dist) {
+  const kpiEl  = document.getElementById(`kpiSpd${sensor}`);
+  const dirEl  = document.getElementById(`spdDir${sensor}`);
+  const badgeEl= document.getElementById(`spdBadge${sensor}`);
+  // Only show speed when vehicle is in sensor range (< 2× threshold, as rough proximity gate)
+  const inRange = dist !== null && dist < thresh * 2.5;
+  if (!inRange || !sp) {
+    kpiEl.textContent  = '—';
+    dirEl.textContent  = '—';
+    dirEl.style.color  = '#475569';
+    badgeEl.textContent= '— km/h';
+    badgeEl.className  = 'speed-badge spd-stationary';
+    return;
+  }
+  kpiEl.textContent = sp.kmh;
+  const dirMap = {
+    approaching: { label: '▼ Approaching', color:'#f87171', cls:'spd-approach' },
+    receding:    { label: '▲ Receding',    color:'#4ade80', cls:'spd-recede'   },
+    stationary:  { label: '■ Stationary',  color:'#60a5fa', cls:'spd-stationary'},
+    slow:        { label: '◈ Slow',        color:'#facc15', cls:'spd-stationary'},
+  };
+  const dm = dirMap[sp.direction] ?? dirMap.stationary;
+  dirEl.textContent  = dm.label;
+  dirEl.style.color  = dm.color;
+  badgeEl.textContent= `${sp.kmh} km/h`;
+  badgeEl.className  = `speed-badge ${dm.cls}`;
+}
+
+// ── SVG update ───────────────────────────────────────────────
+function updateSVG(d, cA, cB, spA, spB) {
+  const occA = cA !== null && cA < (d.threshA ?? 150);
+  const occB = cB !== null && cB < (d.threshB ?? 150);
   const s    = Math.min(d.state ?? 0, 3);
 
   document.getElementById('vehA').setAttribute('opacity', occA ? '1' : '0');
   document.getElementById('vehB').setAttribute('opacity', occB ? '1' : '0');
-  document.getElementById('beamA').setAttribute('stroke', occA ? '#f97316' : '#22d3ee');
-  document.getElementById('beamB').setAttribute('stroke', occB ? '#ef4444'  : '#2dd4bf');
-  document.getElementById('dotA').setAttribute('fill',   occA ? '#f97316' : '#22d3ee');
-  document.getElementById('dotB').setAttribute('fill',   occB ? '#ef4444'  : '#2dd4bf');
-  document.getElementById('svgLabel').textContent  = STATE_LABELS[s];
+  document.getElementById('beamA').setAttribute('stroke',   occA ? '#f97316' : '#22d3ee');
+  document.getElementById('beamB').setAttribute('stroke',   occB ? '#ef4444'  : '#2dd4bf');
+  document.getElementById('dotA').setAttribute('fill',      occA ? '#f97316' : '#22d3ee');
+  document.getElementById('dotB').setAttribute('fill',      occB ? '#ef4444'  : '#2dd4bf');
+  document.getElementById('svgLabel').textContent = STATE_LABELS[s];
   document.getElementById('svgLabel').setAttribute('fill', STATE_COLORS[s]);
+
+  // Speed labels on SVG (only when vehicle in range)
+  const spdA = document.getElementById('svgSpdA');
+  const spdB = document.getElementById('svgSpdB');
+  if (occA && spA && spA.kmh > 0) {
+    spdA.setAttribute('opacity', '1');
+    spdA.textContent = `${spA.kmh} km/h`;
+  } else {
+    spdA.setAttribute('opacity', '0');
+  }
+  if (occB && spB && spB.kmh > 0) {
+    spdB.setAttribute('opacity', '1');
+    spdB.textContent = `${spB.kmh} km/h`;
+  } else {
+    spdB.setAttribute('opacity', '0');
+  }
 }
 
-// ── Live ToF Chart ────────────────────────────────────
-const tofLabels = [];
-const tofDataA  = [];
-const tofDataB  = [];
+// ── Live ToF Chart ───────────────────────────────────────────
+const tofLabels = [], tofDataA = [], tofDataB = [];
 const MAX_PTS   = 60;
 
 const chartTof = new Chart(document.getElementById('chartTof'), {
@@ -444,105 +585,105 @@ const chartTof = new Chart(document.getElementById('chartTof'), {
   data: {
     labels: tofLabels,
     datasets: [
-      {
-        label: 'Sensor A',
-        data: tofDataA,
-        borderColor: '#22d3ee',
-        backgroundColor: 'rgba(34,211,238,0.06)',
-        tension: 0.35, pointRadius: 0, borderWidth: 2, fill: true,
-        spanGaps: false   // breaks line on null (OOR readings)
-      },
-      {
-        label: 'Sensor B',
-        data: tofDataB,
-        borderColor: '#2dd4bf',
-        backgroundColor: 'rgba(45,212,191,0.06)',
-        tension: 0.35, pointRadius: 0, borderWidth: 2, fill: true,
-        spanGaps: false
-      }
+      { label:'Sensor A', data:tofDataA, borderColor:'#22d3ee',
+        backgroundColor:'rgba(34,211,238,0.06)', tension:0.35,
+        pointRadius:0, borderWidth:2, fill:true, spanGaps:false },
+      { label:'Sensor B', data:tofDataB, borderColor:'#2dd4bf',
+        backgroundColor:'rgba(45,212,191,0.06)', tension:0.35,
+        pointRadius:0, borderWidth:2, fill:true, spanGaps:false }
     ]
   },
   options: {
-    animation: false,
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
-    scales: {
-      x: {
-        ticks: { color: '#475569', maxRotation: 0, maxTicksLimit: 6, font: { size: 10 } },
-        grid:  { color: '#1e293b' }
-      },
-      y: {
-        min: 0, max: TOF_MAX + 100,
-        ticks: { color: '#475569', font: { size: 10 } },
-        grid:  { color: '#1e293b' },
-        title: { display: true, text: 'mm', color: '#475569', font: { size: 10 } }
-      }
+    animation:false, responsive:true, maintainAspectRatio:false,
+    interaction:{ mode:'index', intersect:false },
+    scales:{
+      x:{ ticks:{ color:'#475569', maxRotation:0, maxTicksLimit:6, font:{size:10} }, grid:{color:'#1e293b'} },
+      y:{ min:0, max:TOF_MAX+100, ticks:{ color:'#475569', font:{size:10} }, grid:{color:'#1e293b'},
+          title:{display:true, text:'mm', color:'#475569', font:{size:10}} }
     },
-    plugins: {
-      legend: { labels: { color: '#94a3b8', boxWidth: 10, font: { size: 11 } } },
-      tooltip: {
-        callbacks: {
-          label: ctx => ctx.parsed.y !== null
-            ? ` ${ctx.dataset.label}: ${ctx.parsed.y} mm`
-            : ` ${ctx.dataset.label}: out-of-range`
-        }
-      }
+    plugins:{
+      legend:{ labels:{ color:'#94a3b8', boxWidth:10, font:{size:11} } },
+      tooltip:{ callbacks:{ label: ctx =>
+        ctx.parsed.y !== null
+          ? ` ${ctx.dataset.label}: ${ctx.parsed.y} mm`
+          : ` ${ctx.dataset.label}: out-of-range`
+      }}
     }
   }
 });
 
-function updateChart(d) {
-  const t  = new Date().toLocaleTimeString();
-  const cA = clampTof(d.dA);   // null if OOR
-  const cB = clampTof(d.dB);
-
-  tofLabels.push(t);
+function updateChart(cA, cB) {
+  tofLabels.push(new Date().toLocaleTimeString());
   tofDataA.push(cA);
   tofDataB.push(cB);
-
-  if (tofLabels.length > MAX_PTS) {
-    tofLabels.shift(); tofDataA.shift(); tofDataB.shift();
-  }
+  if (tofLabels.length > MAX_PTS) { tofLabels.shift(); tofDataA.shift(); tofDataB.shift(); }
   chartTof.update();
 }
 
-// ── Emergency Banner ──────────────────────────────────
+// ── Emergency overlay ────────────────────────────────────────
 function checkEmergency(d) {
-  const banner = document.getElementById('emergencyBanner');
+  const overlay = document.getElementById('emergencyOverlay');
   if ((d.state ?? 0) === 3) {
-    banner.style.display = 'block';
-    document.getElementById('stallTimerBanner').textContent =
-      `Stall: ${(d.stallSec ?? 0).toFixed(1)} s`;
+    document.getElementById('overlayStall').textContent =
+      `Stalled for ${(d.stallSec ?? 0).toFixed(1)} s`;
+    if (!alertDismissed) overlay.classList.add('show');
   } else {
-    banner.style.display = 'none';
+    overlay.classList.remove('show');
+    alertDismissed = false;  // reset for next event
   }
 }
 
 function lockRedClosure() {
   logAction('Lock Closure activated');
   pushConfigDirect({ modeOverride: 'FORCE_RED_STOP' });
+  dismissOverlay();
 }
 function dispatchPatrol() {
   logAction('Patrol dispatched');
   alert('🚔 Patrol dispatch logged. Notify your control room.');
+  dismissOverlay();
 }
 function clearEmergency() {
   logAction('Emergency cleared by operator');
   pushConfigDirect({ modeOverride: 'NONE' });
-  document.getElementById('emergencyBanner').style.display = 'none';
+  dismissOverlay();
+}
+function dismissOverlay() {
+  alertDismissed = true;
+  document.getElementById('emergencyOverlay').classList.remove('show');
 }
 
-// ── Remote Config ─────────────────────────────────────
+// ── Slider sync (keep sliders reflecting firmware values) ─────
+let sliderTouched = { A: false, B: false };
+document.getElementById('threshASlider').addEventListener('mousedown', () => sliderTouched.A = true);
+document.getElementById('threshBSlider').addEventListener('mousedown', () => sliderTouched.B = true);
+
+function syncSliders(d) {
+  if (!sliderTouched.A && d.threshA) {
+    document.getElementById('threshASlider').value = d.threshA;
+    document.getElementById('threshAVal').textContent = d.threshA;
+  }
+  if (!sliderTouched.B && d.threshB) {
+    document.getElementById('threshBSlider').value = d.threshB;
+    document.getElementById('threshBVal').textContent = d.threshB;
+  }
+}
+
+// ── Remote Config ────────────────────────────────────────────
 async function pushConfig() {
+  const tA = parseInt(document.getElementById('threshASlider').value);
+  const tB = parseInt(document.getElementById('threshBSlider').value);
   const cfg = {
     modeOverride:    document.getElementById('modeSelect').value,
+    threshA:         tA,
+    threshB:         tB,
     stallTimeoutSec: parseInt(document.getElementById('stallSlider').value)
   };
   await pushConfigDirect(cfg);
-  const fb = document.getElementById('configFeedback');
-  fb.textContent = '✓ Config applied at ' + new Date().toLocaleTimeString();
-  logAction('Config applied: ' + JSON.stringify(cfg));
+  sliderTouched.A = false; sliderTouched.B = false;  // allow re-sync after apply
+  document.getElementById('configFeedback').textContent =
+    `✓ Applied threshA=${tA} mm, threshB=${tB} mm at ${new Date().toLocaleTimeString()}`;
+  logAction(`Config: threshA=${tA}, threshB=${tB}, mode=${cfg.modeOverride}, stall=${cfg.stallTimeoutSec}s`);
 }
 
 async function pushConfigDirect(cfg) {
@@ -558,74 +699,70 @@ async function pushConfigDirect(cfg) {
 
 async function remoteTare() {
   await pushConfigDirect({ recalibrate: true });
+  sliderTouched.A = false; sliderTouched.B = false;
   document.getElementById('configFeedback').textContent =
-    '✓ Auto-Tare triggered at ' + new Date().toLocaleTimeString();
+    `✓ Auto-Tare triggered at ${new Date().toLocaleTimeString()} — sliders will sync to new thresholds`;
   logAction('Remote Auto-Tare triggered');
 }
 
-// ── Incident Log ──────────────────────────────────────
-function trackIncident(d) {
+// ── Incident Log ─────────────────────────────────────────────
+function trackIncident(d, spA, spB) {
   const s = d.state ?? 0;
   if (s !== lastState) {
     lastState = s;
     if (s >= 1) {
       incidentLog.unshift({
         ts:    new Date().toLocaleTimeString(),
-        state: STATE_LABELS[Math.min(s, 3)],
-        dA:    d.dA, dB: d.dB,
-        stall: (d.stallSec ?? 0).toFixed(1),
-        note:  s === 3 ? '⚠ AUTO-ALERT' : ''
+        state: STATE_LABELS[Math.min(s,3)],
+        dA: d.dA, dB: d.dB,
+        spdA: spA ? `${spA.kmh} km/h` : '—',
+        spdB: spB ? `${spB.kmh} km/h` : '—',
+        stall: (d.stallSec??0).toFixed(1),
+        note:  s === 3 ? '🚨 STALL ALERT' : ''
       });
       renderLog();
     }
   }
 }
 function logAction(note) {
-  incidentLog.unshift({
-    ts: new Date().toLocaleTimeString(),
-    state: '—', dA: '—', dB: '—', stall: '—', note
-  });
+  incidentLog.unshift({ ts: new Date().toLocaleTimeString(),
+    state:'—', dA:'—', dB:'—', spdA:'—', spdB:'—', stall:'—', note });
   renderLog();
 }
 function renderLog() {
   document.getElementById('logBody').innerHTML =
-    incidentLog.slice(0, 60).map(r =>
-      `<tr>
-        <td class="px-2">${r.ts}</td>
-        <td class="px-2">${r.state}</td>
-        <td class="px-2">${r.dA}</td>
-        <td class="px-2">${r.dB}</td>
-        <td class="px-2">${r.stall}</td>
-        <td class="px-2">${r.note}</td>
-      </tr>`
+    incidentLog.slice(0,60).map(r =>
+      `<tr><td>${r.ts}</td><td>${r.state}</td><td>${r.dA}</td><td>${r.dB}</td>
+       <td>${r.spdA}</td><td>${r.spdB}</td><td>${r.stall}</td>
+       <td>${r.note}</td></tr>`
     ).join('');
 }
 
 function exportCSV() {
-  const hdr  = 'Time,State,dA,dB,StallSec,Note\n';
-  const rows = incidentLog
-    .map(r => `"${r.ts}","${r.state}",${r.dA},${r.dB},${r.stall},"${r.note}"`)
-    .join('\n');
-  const a = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(new Blob([hdr + rows], { type: 'text/csv' })),
+  const hdr  = 'Time,State,dA,dB,SpdA,SpdB,StallSec,Note\n';
+  const rows = incidentLog.map(r =>
+    `"${r.ts}","${r.state}",${r.dA},${r.dB},"${r.spdA}","${r.spdB}",${r.stall},"${r.note}"`
+  ).join('\n');
+  Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([hdr+rows],{type:'text/csv'})),
     download: `apexvision_${Date.now()}.csv`
-  });
-  a.click();
+  }).click();
 }
 
-// ── Connection status ─────────────────────────────────
+// ── Connection status ─────────────────────────────────────────
 function setConn(ok) {
   const el = document.getElementById('connStatus');
   el.textContent = ok ? '● Live' : '● Offline';
   el.className = `px-2.5 py-1 rounded-full text-xs ${
-    ok ? 'bg-green-900/60 text-green-300' : 'bg-red-900/60 text-red-300'
-  }`;
+    ok ? 'bg-green-900/60 text-green-300' : 'bg-red-900/60 text-red-300'}`;
 }
 
-// ── Simulator toggle ──────────────────────────────────
+// ── Sim toggle ───────────────────────────────────────────────
 document.getElementById('simToggle').addEventListener('change', e => {
   isSimMode = e.target.checked;
-  bootTs    = Date.now();
+  bootTs = Date.now(); simT = 0;
+  prevReading.A = null; prevReading.B = null;
+  spdEmaA = 0; spdEmaB = 0;
   logAction(isSimMode ? 'Simulator ON' : 'Simulator OFF');
 });
 </script>
