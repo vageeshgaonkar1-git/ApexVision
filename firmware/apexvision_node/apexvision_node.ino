@@ -455,10 +455,10 @@ bool reinitSensor(bool isA) {
 
 // =============================================================
 //  READ SENSOR — clamped to 30–2000 mm
-//  Returns 2000.0f (lane clear) instead of 9999.0f so the EMA
-//  filter never spikes on a clear-road reading.
-//  RangeStatus 4 = phase failure (no object) → treat as 2000 mm.
-//  8190/8191 wrap-around readings are also clamped to 2000 mm.
+//  Returns 2500.0f (> 2000) to signal Out of Range so the EMA
+//  filter and dashboard can distinguish "no object" cleanly.
+//  RangeStatus 4 = phase failure (no object in range).
+//  8190/8191 wrap-around readings are also treated as OOR.
 // =============================================================
 float readSensor(bool isA) {
   VL53L0X_RangingMeasurementData_t measure;
@@ -477,25 +477,33 @@ float readSensor(bool isA) {
       return (float)measure.RangeMilliMeter;
     }
   }
-  // Return max range (clear lane) — never 9999 — so EMA stays clean
-  return 2000.0f;
+  return 2500.0f;  // > 2000 mm signals Out of Range
 }
 
 // =============================================================
 //  EMA SMOOTHING
-//  Only update EMA on real detections (< 2000 mm).
-//  2000.0f is the clear-lane sentinel — do not feed it into EMA
-//  or it will push emaA/emaB upward and delay detection.
+//  - If raw > 2000 mm (OOR): mark EMA as OOR immediately (2500)
+//  - If previous EMA was OOR and new reading is valid: snap
+//    directly to the real reading (no slow averaging from 2500)
+//  - Otherwise: standard EMA
 // =============================================================
 void updateEMA() {
-  if (dA >= 30.0f && dA < 2000.0f)
+  // Sensor A
+  if (dA > 2000.0f) {
+    emaA = 2500.0f;                              // OOR — mark immediately
+  } else if (emaA > 2000.0f) {
+    emaA = dA;                                   // snap: was OOR, now valid
+  } else {
     emaA = EMA_ALPHA * dA + (1.0f - EMA_ALPHA) * emaA;
-  if (dB >= 30.0f && dB < 2000.0f)
+  }
+  // Sensor B
+  if (dB > 2000.0f) {
+    emaB = 2500.0f;
+  } else if (emaB > 2000.0f) {
+    emaB = dB;
+  } else {
     emaB = EMA_ALPHA * dB + (1.0f - EMA_ALPHA) * emaB;
-  // When lane is clear, let EMA drift back toward 2000 mm slowly
-  // so the state machine correctly reads "not occupied"
-  if (dA >= 2000.0f) emaA = min(emaA + 20.0f, 2000.0f);
-  if (dB >= 2000.0f) emaB = min(emaB + 20.0f, 2000.0f);
+  }
 }
 
 // =============================================================
@@ -542,7 +550,7 @@ void updateStateMachine() {
     return;
   }
 
-  bool occA = (emaA < threshA);
+  bool occA = (emaA < threshA);   // emaA = 2500 when OOR → never < threshA
   bool occB = (emaB < threshB);
 
   if (!occA && !occB) {
