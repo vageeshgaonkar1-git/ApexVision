@@ -1,8 +1,8 @@
 // =============================================================
 //  ApexVision — Blind-Curve Hazard Warning Node
-//  Target: ESP32 (38-pin or DevKit V1)
+//  Target : ESP32 (38-pin or DevKit V1)
 //
-//  Actual hardware connections (matched to working prototype):
+//  Hardware connections (prototype):
 //    I2C SDA       → GPIO 21
 //    I2C SCL       → GPIO 22
 //    XSHUT Sensor A→ GPIO 18   (Sensor A reassigned to 0x30)
@@ -12,6 +12,11 @@
 //
 //  Requires: Adafruit_VL53L0X, WiFiClientSecure, HTTPClient, ArduinoJson
 //  Firebase RTDB: apexvision-8f1e4 (Test Mode, no auth)
+//
+//  Core assignment:
+//    Core 1 (default Arduino core) — ToF reads, EMA, state machine, LEDs
+//    Core 0 (FreeRTOS task)        — Firebase PUT telemetry + GET config
+//    This keeps real-time LED blinking jitter-free even during TLS hangs.
 // =============================================================
 
 #include <Wire.h>
@@ -34,27 +39,27 @@ const char* FB_BASE = "https://apexvision-8f1e4-default-rtdb.asia-southeast1.fir
 const char* NODE_ID = "node_01";
 
 // ─────────────────────────────────────────────
-//  Hardware Pins  (matched to prototype wiring)
+//  Hardware Pins
 // ─────────────────────────────────────────────
 #define SDA_PIN     21
 #define SCL_PIN     22
-#define XSHUT_A     18      // Sensor A shutdown pin
-#define XSHUT_B     19      // Sensor B shutdown pin
-#define ADDR_A      0x30    // Sensor A reassigned address
-#define ADDR_B      0x29    // Sensor B stays at default
+#define XSHUT_A     18
+#define XSHUT_B     19
+#define ADDR_A      0x30    // Sensor A reassigned
+#define ADDR_B      0x29    // Sensor B default
 
-#define RED_LED     25      // Red  LED  — both-side danger
-#define YELLOW_LED  26      // Yellow LED — one-side caution
+#define RED_LED     25
+#define YELLOW_LED  26
 
 // ─────────────────────────────────────────────
-//  Detection & Calibration
+//  Calibration & Detection
 // ─────────────────────────────────────────────
-#define DISTANCE_THRESHOLD  150   // hard fallback threshold (mm)
-#define CALIB_SAMPLES        15   // boot calibration sample count
-#define THRESH_RATIO       0.75f  // threshold = 0.75 × baseline
-#define THRESH_MIN_MM       100   // clamp low  (mm)
-#define THRESH_MAX_MM       900   // clamp high (mm)
-#define EMA_ALPHA          0.65f  // EMA weight on newest reading
+#define DISTANCE_THRESHOLD  150
+#define CALIB_SAMPLES        15
+#define THRESH_RATIO       0.75f
+#define THRESH_MIN_MM       100
+#define THRESH_MAX_MM       900
+#define EMA_ALPHA          0.65f
 
 float threshA = DISTANCE_THRESHOLD;
 float threshB = DISTANCE_THRESHOLD;
@@ -64,95 +69,125 @@ float emaB    = (float)DISTANCE_THRESHOLD;
 // ─────────────────────────────────────────────
 //  State Machine
 // ─────────────────────────────────────────────
-//  0 = Clear   1 = One-side caution
-//  2 = Both-side danger   3 = Stall hazard
 int   systemState     = 0;
 float stallTimeoutSec = 5.0f;
 unsigned long stallStartMs = 0;
 float stallSec        = 0.0f;
 
 // ─────────────────────────────────────────────
-//  Remote Config / Override
+//  Remote Config
 // ─────────────────────────────────────────────
-String modeOverride  = "NONE";  // FORCE_RED_STOP | FORCE_YELLOW_CAUTION | ECO_SLEEP | NONE
-bool   buzzerEnabled = true;    // kept in config schema even though no buzzer pin wired
-int    pwmDuty       = 128;
+String modeOverride = "NONE";
 
 // ─────────────────────────────────────────────
-//  Timing
+//  Timing (Core 1 — real-time loop)
 // ─────────────────────────────────────────────
-unsigned long lastTelemetryMs = 0;
-unsigned long lastConfigMs    = 0;
-unsigned long lastBlinkMs     = 0;
-unsigned long bootMs          = 0;
+unsigned long lastBlinkMs = 0;
+unsigned long bootMs      = 0;
 
-#define TELEMETRY_INTERVAL_MS   650
-#define CONFIG_INTERVAL_MS     1500
-#define BLINK_2HZ_MS            250   // 500 ms period → 250 ms half-period
-#define BLINK_5HZ_MS            100   // 200 ms period → 100 ms half-period
+#define BLINK_2HZ_MS   250
+#define BLINK_5HZ_MS   100
 
 bool blinkState = false;
 
 // ─────────────────────────────────────────────
-//  Sensor Objects
+//  Sensors
 // ─────────────────────────────────────────────
 Adafruit_VL53L0X sensorA = Adafruit_VL53L0X();
 Adafruit_VL53L0X sensorB = Adafruit_VL53L0X();
-
 bool sensorA_ok = false;
 bool sensorB_ok = false;
-
 float dA = 9999.0f;
 float dB = 9999.0f;
+
+// ─────────────────────────────────────────────
+//  Shared telemetry struct (Core 1 writes, Core 0 reads)
+//  Protected by a FreeRTOS mutex.
+// ─────────────────────────────────────────────
+struct TelemetrySnapshot {
+  int   dA, dB;
+  int   threshA, threshB;
+  int   state;
+  float stallSec;
+  int   rssi;
+  unsigned long uptimeSec;
+  bool  sensorA_ok, sensorB_ok;
+  char  modeOverride[24];
+};
+
+struct ConfigUpdate {
+  bool   hasUpdate;
+  char   modeOverride[24];
+  float  threshA, threshB;
+  float  stallTimeoutSec;
+  bool   recalibrate;
+};
+
+volatile TelemetrySnapshot latestTelemetry = {};
+volatile ConfigUpdate      pendingConfig   = {};
+SemaphoreHandle_t          telemMutex      = NULL;
+SemaphoreHandle_t          configMutex     = NULL;
 
 // ─────────────────────────────────────────────
 //  Prototypes
 // ─────────────────────────────────────────────
 void  initSensors();
+bool  reinitSensor(bool isA);
 void  calibrate();
 float readSensor(bool isA);
 void  updateEMA();
 void  updateStateMachine();
 void  driveOutputs();
-void  pushTelemetry();
-void  fetchConfig();
 void  allLEDsOff();
+void  firebaseTask(void* param);   // Core 0 task
 
 // =============================================================
-//  SETUP
+//  SETUP  (Core 1)
 // =============================================================
 void setup() {
   Serial.begin(115200);
   bootMs = millis();
 
-  // ── GPIO init ──
-  pinMode(XSHUT_A,   OUTPUT);
-  pinMode(XSHUT_B,   OUTPUT);
-  pinMode(RED_LED,   OUTPUT);
+  pinMode(XSHUT_A,    OUTPUT);
+  pinMode(XSHUT_B,    OUTPUT);
+  pinMode(RED_LED,    OUTPUT);
   pinMode(YELLOW_LED, OUTPUT);
   allLEDsOff();
 
-  // ── I2C ──
+  // I2C with bus timeout — prevents lockup on long wires
   Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setTimeOut(50);   // 50 ms I2C timeout; Wire resets bus if exceeded
 
-  // ── Sensors ──
   initSensors();
   calibrate();
 
-  // ── WiFi ──
+  // WiFi
   Serial.printf("[WiFi] Connecting to %s ...\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
-    delay(500);
-    Serial.print(".");
-    tries++;
+    delay(500); Serial.print("."); tries++;
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\n[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
     Serial.println("\n[WiFi] Failed — running offline.");
   }
+
+  // Create mutexes
+  telemMutex  = xSemaphoreCreateMutex();
+  configMutex = xSemaphoreCreateMutex();
+
+  // ── Pin Firebase task to Core 0, stack 8 KB, priority 1 ──
+  xTaskCreatePinnedToCore(
+    firebaseTask,     // function
+    "FirebaseTask",   // name
+    8192,             // stack bytes
+    NULL,             // param
+    1,                // priority (lower than loop()'s 1 on Core 1)
+    NULL,             // handle
+    0                 // Core 0
+  );
 
   Serial.println("--------------------------");
   Serial.println("ApexVision Hazard Node");
@@ -161,64 +196,212 @@ void setup() {
 }
 
 // =============================================================
-//  LOOP
+//  LOOP  (Core 1 — real-time: sensors + state machine + LEDs)
+//  Target cycle: ~25 ms  (ToF read ~20 ms + processing ~5 ms)
 // =============================================================
 void loop() {
-  unsigned long now = millis();
-
-  // ── Read & smooth sensors ──
+  // ── Read sensors ──
   dA = readSensor(true);
   dB = readSensor(false);
-  updateEMA();
 
-  // ── State machine ──
+  // ── Auto-recover failed sensors via XSHUT toggle ──
+  static unsigned long lastRecoveryMs = 0;
+  if (!sensorA_ok || !sensorB_ok) {
+    unsigned long now = millis();
+    if (now - lastRecoveryMs > 5000) {   // attempt recovery every 5 s
+      lastRecoveryMs = now;
+      if (!sensorA_ok) {
+        Serial.println("[I2C] Attempting Sensor A recovery...");
+        sensorA_ok = reinitSensor(true);
+      }
+      if (!sensorB_ok) {
+        Serial.println("[I2C] Attempting Sensor B recovery...");
+        sensorB_ok = reinitSensor(false);
+      }
+    }
+  }
+
+  // ── EMA + state machine ──
+  updateEMA();
   updateStateMachine();
+
+  // ── Apply any pending config from Core 0 ──
+  if (xSemaphoreTake(configMutex, 0) == pdTRUE) {
+    if (pendingConfig.hasUpdate) {
+      modeOverride    = String(pendingConfig.modeOverride);
+      threshA         = constrain(pendingConfig.threshA, THRESH_MIN_MM, THRESH_MAX_MM);
+      threshB         = constrain(pendingConfig.threshB, THRESH_MIN_MM, THRESH_MAX_MM);
+      stallTimeoutSec = pendingConfig.stallTimeoutSec;
+      if (pendingConfig.recalibrate) {
+        calibrate();
+        pendingConfig.recalibrate = false;
+      }
+      pendingConfig.hasUpdate = false;
+    }
+    xSemaphoreGive(configMutex);
+  }
+
+  // ── Publish telemetry snapshot for Core 0 ──
+  if (xSemaphoreTake(telemMutex, 0) == pdTRUE) {
+    latestTelemetry.dA          = (int)emaA;
+    latestTelemetry.dB          = (int)emaB;
+    latestTelemetry.threshA     = (int)threshA;
+    latestTelemetry.threshB     = (int)threshB;
+    latestTelemetry.state       = systemState;
+    latestTelemetry.stallSec    = stallSec;
+    latestTelemetry.rssi        = WiFi.RSSI();
+    latestTelemetry.uptimeSec   = (millis() - bootMs) / 1000;
+    latestTelemetry.sensorA_ok  = sensorA_ok;
+    latestTelemetry.sensorB_ok  = sensorB_ok;
+    strncpy((char*)latestTelemetry.modeOverride, modeOverride.c_str(), 23);
+    xSemaphoreGive(telemMutex);
+  }
 
   // ── Drive LEDs ──
   driveOutputs();
 
-  // ── Serial debug ──
-  Serial.printf("A: %.0f mm  B: %.0f mm  | thA: %.0f  thB: %.0f  | State: %d  Stall: %.1f s\n",
+  // Serial debug (brief)
+  Serial.printf("A:%.0f B:%.0f thA:%.0f thB:%.0f St:%d Stall:%.1fs\n",
                 emaA, emaB, threshA, threshB, systemState, stallSec);
 
-  // ── Firebase telemetry push ──
-  if (now - lastTelemetryMs >= TELEMETRY_INTERVAL_MS) {
-    lastTelemetryMs = now;
-    if (WiFi.status() == WL_CONNECTED) pushTelemetry();
-  }
-
-  // ── Firebase config pull ──
-  if (now - lastConfigMs >= CONFIG_INTERVAL_MS) {
-    lastConfigMs = now;
-    if (WiFi.status() == WL_CONNECTED) fetchConfig();
-  }
-
-  delay(50);
+  delay(25);   // ~40 Hz real-time loop
 }
 
 // =============================================================
-//  SENSOR INIT
-//  Both VL53L0X boot at 0x29.
-//  Strategy: shut both down, bring A up → reassign to 0x30,
-//            then bring B up → it stays at 0x29.
+//  FIREBASE TASK  (Core 0 — network I/O, never blocks Core 1)
+// =============================================================
+void firebaseTask(void* param) {
+  // Persistent WiFiClientSecure with connection reuse
+  // avoids full TLS handshake on every request
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+
+  unsigned long lastPutMs = 0;
+  unsigned long lastGetMs = 0;
+
+  #define PUT_INTERVAL_MS   650
+  #define GET_INTERVAL_MS  1500
+
+  for (;;) {
+    unsigned long now = millis();
+
+    if (WiFi.status() != WL_CONNECTED) {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
+    // ── PUT telemetry every 650 ms ──
+    if (now - lastPutMs >= PUT_INTERVAL_MS) {
+      lastPutMs = now;
+
+      // Snapshot under mutex
+      TelemetrySnapshot snap = {};
+      if (xSemaphoreTake(telemMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        snap = (TelemetrySnapshot)latestTelemetry;
+        xSemaphoreGive(telemMutex);
+      }
+
+      StaticJsonDocument<512> doc;
+      doc["dA"]          = snap.dA;
+      doc["dB"]          = snap.dB;
+      doc["threshA"]     = snap.threshA;
+      doc["threshB"]     = snap.threshB;
+      doc["state"]       = snap.state;
+      doc["stallSec"]    = snap.stallSec;
+      doc["modeOverride"]= snap.modeOverride;
+      doc["rssi"]        = snap.rssi;
+      doc["uptimeSec"]   = snap.uptimeSec;
+      doc["sensorA_ok"]  = snap.sensorA_ok;
+      doc["sensorB_ok"]  = snap.sensorB_ok;
+
+      String body;
+      serializeJson(doc, body);
+
+      String url = String(FB_BASE) + "/nodes/" + NODE_ID + "/telemetry.json";
+      HTTPClient http;
+      http.begin(secureClient, url);
+      http.addHeader("Content-Type", "application/json");
+      http.setReuse(true);   // keep TCP connection alive between requests
+      int code = http.PUT(body);
+      if (code < 0)
+        Serial.printf("[FB] PUT error: %s\n", http.errorToString(code).c_str());
+      http.end();
+    }
+
+    // ── GET config every 1500 ms ──
+    if (now - lastGetMs >= GET_INTERVAL_MS) {
+      lastGetMs = now;
+
+      String url = String(FB_BASE) + "/nodes/" + NODE_ID + "/config.json";
+      HTTPClient http;
+      http.begin(secureClient, url);
+      http.setReuse(true);
+      int code = http.GET();
+
+      if (code == 200) {
+        String payload = http.getString();
+        StaticJsonDocument<512> cfg;
+        if (!deserializeJson(cfg, payload)) {
+
+          if (xSemaphoreTake(configMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            pendingConfig.hasUpdate = true;
+
+            if (!cfg["modeOverride"].isNull())
+              strncpy(pendingConfig.modeOverride, cfg["modeOverride"].as<const char*>(), 23);
+            pendingConfig.threshA = cfg["threshA"].isNull()
+              ? threshA : constrain((float)cfg["threshA"], THRESH_MIN_MM, THRESH_MAX_MM);
+            pendingConfig.threshB = cfg["threshB"].isNull()
+              ? threshB : constrain((float)cfg["threshB"], THRESH_MIN_MM, THRESH_MAX_MM);
+            pendingConfig.stallTimeoutSec = cfg["stallTimeoutSec"].isNull()
+              ? stallTimeoutSec : (float)cfg["stallTimeoutSec"];
+            pendingConfig.recalibrate = (cfg["recalibrate"] == true);
+
+            xSemaphoreGive(configMutex);
+          }
+
+          // Clear recalibrate flag on Firebase
+          if (cfg["recalibrate"] == true) {
+            HTTPClient hp;
+            hp.begin(secureClient, String(FB_BASE) + "/nodes/" + NODE_ID + "/config.json");
+            hp.addHeader("Content-Type", "application/json");
+            hp.addHeader("X-HTTP-Method-Override", "PATCH");
+            hp.setReuse(true);
+            hp.POST("{\"recalibrate\":false}");
+            hp.end();
+            Serial.println("[CAL] Remote recalibrate flag cleared.");
+          }
+        }
+      } else if (code < 0) {
+        Serial.printf("[FB] GET error: %s\n", http.errorToString(code).c_str());
+      }
+      http.end();
+    }
+
+    // Yield to other tasks — do not busy-wait
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+// =============================================================
+//  SENSOR INIT  (dual I2C address sequencing)
 // =============================================================
 void initSensors() {
   digitalWrite(XSHUT_A, LOW);
   digitalWrite(XSHUT_B, LOW);
   delay(10);
 
-  // ── Sensor A: boot at 0x29, reassign to 0x30 ──
+  // Sensor A → 0x30
   digitalWrite(XSHUT_A, HIGH);
   delay(10);
   if (!sensorA.begin(0x29, false, &Wire)) {
     Serial.println("[ToF] Sensor A not detected!");
   } else {
-    sensorA.setAddress(ADDR_A);   // move to 0x30
+    sensorA.setAddress(ADDR_A);
     sensorA_ok = true;
     Serial.println("[ToF] Sensor A OK at 0x30");
   }
 
-  // ── Sensor B: boot at 0x29, stays at 0x29 ──
+  // Sensor B → 0x29
   digitalWrite(XSHUT_B, HIGH);
   delay(10);
   if (!sensorB.begin(ADDR_B, false, &Wire)) {
@@ -230,7 +413,33 @@ void initSensors() {
 }
 
 // =============================================================
-//  READ SENSOR — returns distance in mm, 9999 on error/timeout
+//  SENSOR AUTO-RECOVERY  (toggle XSHUT and re-init one sensor)
+// =============================================================
+bool reinitSensor(bool isA) {
+  int xshut = isA ? XSHUT_A : XSHUT_B;
+  uint8_t addr = isA ? ADDR_A : ADDR_B;
+
+  // Briefly pull XSHUT low to reset the sensor
+  digitalWrite(xshut, LOW);
+  delay(10);
+  digitalWrite(xshut, HIGH);
+  delay(10);
+
+  if (isA) {
+    // Must re-init A before B to avoid address collision
+    if (!sensorA.begin(0x29, false, &Wire)) return false;
+    sensorA.setAddress(ADDR_A);
+    Serial.println("[ToF] Sensor A recovered at 0x30");
+    return true;
+  } else {
+    if (!sensorB.begin(ADDR_B, false, &Wire)) return false;
+    Serial.println("[ToF] Sensor B recovered at 0x29");
+    return true;
+  }
+}
+
+// =============================================================
+//  READ SENSOR
 // =============================================================
 float readSensor(bool isA) {
   VL53L0X_RangingMeasurementData_t measure;
@@ -245,7 +454,7 @@ float readSensor(bool isA) {
 }
 
 // =============================================================
-//  EMA SMOOTHING  (only update when reading is valid)
+//  EMA SMOOTHING
 // =============================================================
 void updateEMA() {
   if (dA < 9000.0f) emaA = EMA_ALPHA * dA + (1.0f - EMA_ALPHA) * emaA;
@@ -253,13 +462,12 @@ void updateEMA() {
 }
 
 // =============================================================
-//  BOOT CALIBRATION — 15-sample tare on empty track
+//  BOOT CALIBRATION
 // =============================================================
 void calibrate() {
-  Serial.println("[CAL] Starting baseline calibration...");
+  Serial.println("[CAL] Calibrating on empty track...");
   float sumA = 0, sumB = 0;
   int   cntA = 0, cntB = 0;
-
   for (int i = 0; i < CALIB_SAMPLES; i++) {
     float rA = readSensor(true);
     float rB = readSensor(false);
@@ -267,7 +475,6 @@ void calibrate() {
     if (rB < 9000.0f) { sumB += rB; cntB++; }
     delay(60);
   }
-
   if (cntA > 0) {
     float base = sumA / cntA;
     threshA = constrain(base * THRESH_RATIO, THRESH_MIN_MM, THRESH_MAX_MM);
@@ -278,7 +485,6 @@ void calibrate() {
     threshB = constrain(base * THRESH_RATIO, THRESH_MIN_MM, THRESH_MAX_MM);
     emaB    = base;
   }
-
   Serial.printf("[CAL] threshA=%.0f mm  threshB=%.0f mm\n", threshA, threshB);
 }
 
@@ -286,28 +492,31 @@ void calibrate() {
 //  STATE MACHINE
 // =============================================================
 void updateStateMachine() {
-  // Remote override takes priority
   if (modeOverride == "FORCE_RED_STOP")       { systemState = 2; return; }
   if (modeOverride == "FORCE_YELLOW_CAUTION") { systemState = 1; return; }
-  if (modeOverride == "ECO_SLEEP")            { systemState = 0; return; }
+  if (modeOverride == "ECO_SLEEP") {
+    systemState = 0;
+    // True low-power: disable WiFi, light-sleep 1 s, re-enable
+    // (Firebase task on Core 0 will pause since WiFi is off)
+    WiFi.disconnect(true);
+    esp_sleep_enable_timer_wakeup(1000000ULL);  // 1 s
+    esp_light_sleep_start();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    return;
+  }
 
   bool occA = (emaA < threshA);
   bool occB = (emaB < threshB);
 
   if (!occA && !occB) {
-    // State 0 — clear
     systemState  = 0;
     stallStartMs = 0;
     stallSec     = 0.0f;
-
   } else if (occA && occB) {
-    // Both occupied — start stall timer
     if (stallStartMs == 0) stallStartMs = millis();
     stallSec    = (millis() - stallStartMs) / 1000.0f;
     systemState = (stallSec >= stallTimeoutSec) ? 3 : 2;
-
   } else {
-    // One side only
     stallStartMs = 0;
     stallSec     = 0.0f;
     systemState  = 1;
@@ -316,51 +525,27 @@ void updateStateMachine() {
 
 // =============================================================
 //  OUTPUT DRIVER
-//  Hardware: RED_LED (GPIO 25), YELLOW_LED (GPIO 26)
-//
-//  State 0 — both off
-//  State 1 — yellow blinks 2 Hz (caution)
-//  State 2 — red blinks 5 Hz (danger)
-//  State 3 — red solid + yellow alternate 5 Hz (stall hazard)
 // =============================================================
 void driveOutputs() {
   unsigned long now = millis();
-
   switch (systemState) {
-
-    // ── State 0: All clear ──
     case 0:
       allLEDsOff();
       break;
-
-    // ── State 1: One side — Yellow blinks 2 Hz ──
     case 1: {
-      if (now - lastBlinkMs >= BLINK_2HZ_MS) {
-        lastBlinkMs = now;
-        blinkState  = !blinkState;
-      }
+      if (now - lastBlinkMs >= BLINK_2HZ_MS) { lastBlinkMs = now; blinkState = !blinkState; }
       digitalWrite(RED_LED,    LOW);
       digitalWrite(YELLOW_LED, blinkState ? HIGH : LOW);
       break;
     }
-
-    // ── State 2: Both sides — Red blinks 5 Hz ──
     case 2: {
-      if (now - lastBlinkMs >= BLINK_5HZ_MS) {
-        lastBlinkMs = now;
-        blinkState  = !blinkState;
-      }
+      if (now - lastBlinkMs >= BLINK_5HZ_MS) { lastBlinkMs = now; blinkState = !blinkState; }
       digitalWrite(RED_LED,    blinkState ? HIGH : LOW);
       digitalWrite(YELLOW_LED, LOW);
       break;
     }
-
-    // ── State 3: Stall hazard — Red solid, Yellow fast-alternates ──
     case 3: {
-      if (now - lastBlinkMs >= BLINK_5HZ_MS) {
-        lastBlinkMs = now;
-        blinkState  = !blinkState;
-      }
+      if (now - lastBlinkMs >= BLINK_5HZ_MS) { lastBlinkMs = now; blinkState = !blinkState; }
       digitalWrite(RED_LED,    HIGH);
       digitalWrite(YELLOW_LED, blinkState ? HIGH : LOW);
       break;
@@ -368,98 +553,7 @@ void driveOutputs() {
   }
 }
 
-// =============================================================
-//  ALL LEDs OFF helper
-// =============================================================
 void allLEDsOff() {
   digitalWrite(RED_LED,    LOW);
   digitalWrite(YELLOW_LED, LOW);
-}
-
-// =============================================================
-//  PUSH TELEMETRY  PUT /nodes/node_01/telemetry.json
-// =============================================================
-void pushTelemetry() {
-  WiFiClientSecure client;
-  client.setInsecure();   // Test Mode — skip cert validation
-
-  HTTPClient http;
-  String url = String(FB_BASE) + "/nodes/" + NODE_ID + "/telemetry.json";
-  http.begin(client, url);
-  http.addHeader("Content-Type", "application/json");
-
-  StaticJsonDocument<512> doc;
-  doc["dA"]           = (int)emaA;
-  doc["dB"]           = (int)emaB;
-  doc["threshA"]      = (int)threshA;
-  doc["threshB"]      = (int)threshB;
-  doc["state"]        = systemState;
-  doc["stallSec"]     = stallSec;
-  doc["modeOverride"] = modeOverride;
-  doc["vBat"]         = 0.0;        // no battery ADC wired on this prototype
-  doc["rssi"]         = WiFi.RSSI();
-  doc["uptimeSec"]    = (millis() - bootMs) / 1000;
-  doc["sensorA_ok"]   = sensorA_ok;
-  doc["sensorB_ok"]   = sensorB_ok;
-
-  String body;
-  serializeJson(doc, body);
-
-  int code = http.PUT(body);
-  if (code < 0) {
-    Serial.printf("[FB] Telemetry PUT error: %s\n", http.errorToString(code).c_str());
-  }
-  http.end();
-}
-
-// =============================================================
-//  FETCH CONFIG  GET /nodes/node_01/config.json
-// =============================================================
-void fetchConfig() {
-  WiFiClientSecure client;
-  client.setInsecure();
-
-  HTTPClient http;
-  String url = String(FB_BASE) + "/nodes/" + NODE_ID + "/config.json";
-  http.begin(client, url);
-
-  int code = http.GET();
-  if (code == 200) {
-    String payload = http.getString();
-    StaticJsonDocument<512> doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (!err) {
-      if (!doc["modeOverride"].isNull())
-        modeOverride = doc["modeOverride"].as<String>();
-      if (!doc["threshA"].isNull())
-        threshA = constrain((float)doc["threshA"], THRESH_MIN_MM, THRESH_MAX_MM);
-      if (!doc["threshB"].isNull())
-        threshB = constrain((float)doc["threshB"], THRESH_MIN_MM, THRESH_MAX_MM);
-      if (!doc["stallTimeoutSec"].isNull())
-        stallTimeoutSec = (float)doc["stallTimeoutSec"];
-      if (!doc["buzzerEnabled"].isNull())
-        buzzerEnabled = (bool)doc["buzzerEnabled"];
-      if (!doc["pwmDuty"].isNull())
-        pwmDuty = (int)doc["pwmDuty"];
-
-      // Remote recalibrate trigger
-      if (doc["recalibrate"] == true) {
-        calibrate();
-        // Clear the flag on Firebase
-        WiFiClientSecure c2;
-        c2.setInsecure();
-        HTTPClient hp;
-        String patchUrl = String(FB_BASE) + "/nodes/" + NODE_ID + "/config.json";
-        hp.begin(c2, patchUrl);
-        hp.addHeader("Content-Type", "application/json");
-        hp.addHeader("X-HTTP-Method-Override", "PATCH");
-        hp.POST("{\"recalibrate\":false}");
-        hp.end();
-        Serial.println("[CAL] Remote recalibrate done, flag cleared.");
-      }
-    }
-  } else if (code < 0) {
-    Serial.printf("[FB] Config GET error: %s\n", http.errorToString(code).c_str());
-  }
-  http.end();
 }
