@@ -25,19 +25,39 @@ GY-53 (B) ──┘
 
 ---
 
-## Pin Mapping (Prototype)
+## Pin Mapping (Final Wiring)
 
-| Signal         | GPIO |
-|----------------|------|
-| I2C SDA        | 21   |
-| I2C SCL        | 22   |
-| XSHUT Sensor A | 18   |
-| XSHUT Sensor B | 19   |
-| RED LED        | 25   |
-| YELLOW LED     | 26   |
+### Sensor A — left approach (GY-53 / VL53L0X)
 
-Sensor A is reassigned from default `0x29` → `0x30` via XSHUT sequencing.  
-Sensor B stays at default `0x29`.
+| Sensor Pin | ESP32 GPIO |
+|------------|------------|
+| VCC        | 3V3        |
+| GND        | GND        |
+| SDA        | GPIO 21    |
+| SCL        | GPIO 22    |
+| XSHUT      | **GPIO 16** (reassigns to I2C 0x30) |
+| GPIO1      | Leave empty |
+
+### Sensor B — right approach (GY-53 / VL53L0X)
+
+| Sensor Pin | ESP32 GPIO |
+|------------|------------|
+| VCC        | 3V3        |
+| GND        | GND        |
+| SDA        | GPIO 21 (shared bus) |
+| SCL        | GPIO 22 (shared bus) |
+| XSHUT      | **GPIO 17** (stays at I2C 0x29) |
+| GPIO1      | Leave empty |
+
+### 3-Light Traffic Module
+
+| Module Pin | ESP32 GPIO | Function |
+|------------|------------|----------|
+| Y (Yellow) | **GPIO 18** | One-side caution (blinks 2 Hz) |
+| R (Red)    | **GPIO 19** | Both-side danger / stall (blinks 5 Hz) |
+| GND        | GND        | — |
+
+> The Green pin of the traffic module is not used — road-clear state means all LEDs off.
 
 ---
 
