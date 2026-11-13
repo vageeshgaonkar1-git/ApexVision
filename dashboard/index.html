@@ -400,7 +400,13 @@ let incidentLog = [];
 let lastState   = -1;
 let simT        = 0;
 let bootTs      = Date.now();
-let alertDismissed = false;  // user dismissed this stall event
+let alertDismissed = false;
+
+// ── Stale-node watchdog ───────────────────────────────────────
+// If uptimeSec from ESP32 hasn't changed for 4 s, mark as STALE
+let lastUptimeSec   = -1;
+let lastUptimeRxMs  = 0;
+const STALE_TIMEOUT_MS = 4000;
 
 const STATE_LABELS = ['CLEAR', 'ONE-SIDE', 'BOTH-OCC', 'STALL ⚠'];
 const STATE_COLORS = ['#22c55e','#eab308','#ef4444','#a855f7'];
@@ -497,8 +503,12 @@ async function fetchTelemetry() {
 // ── Main poll (500 ms) ────────────────────────────────────────
 async function poll() {
   const d = await fetchTelemetry();
+
+  // Always tick watchdog even on failed fetch
+  checkWatchdog(d);
+
   if (!d) return;
-  setConn(true);
+  setConn(true, d.uptimeSec);
   const now = Date.now();
   const cA  = clampTof(d.dA);
   const cB  = clampTof(d.dB);
@@ -854,12 +864,38 @@ function exportCSV() {
   }).click();
 }
 
+// ── Stale-node watchdog ───────────────────────────────────────
+// Firebase returns cached values even when ESP32 is offline.
+// We detect a stale node by watching whether uptimeSec stops incrementing.
+function checkWatchdog(d) {
+  if (isSimMode) return;
+  const now = Date.now();
+  if (d && typeof d.uptimeSec === 'number') {
+    if (d.uptimeSec !== lastUptimeSec) {
+      // uptimeSec changed — node is alive
+      lastUptimeSec  = d.uptimeSec;
+      lastUptimeRxMs = now;
+    }
+  }
+  const age = now - lastUptimeRxMs;
+  if (lastUptimeRxMs > 0 && age > STALE_TIMEOUT_MS) {
+    setConn('stale');
+  }
+}
+
 // ── Connection status ─────────────────────────────────────────
-function setConn(ok) {
+function setConn(status) {
   const el = document.getElementById('connStatus');
-  el.textContent = ok ? '● Live' : '● Offline';
-  el.className = `px-2.5 py-1 rounded-full text-xs ${
-    ok ? 'bg-green-900/60 text-green-300' : 'bg-red-900/60 text-red-300'}`;
+  if (status === true) {
+    el.textContent = '● Live';
+    el.className = 'px-2.5 py-1 rounded-full text-xs bg-green-900/60 text-green-300';
+  } else if (status === 'stale') {
+    el.textContent = '⚠ Node Offline / Stale';
+    el.className = 'px-2.5 py-1 rounded-full text-xs bg-yellow-900/60 text-yellow-300';
+  } else {
+    el.textContent = '● Offline';
+    el.className = 'px-2.5 py-1 rounded-full text-xs bg-red-900/60 text-red-300';
+  }
 }
 
 // ── Sim toggle ───────────────────────────────────────────────
