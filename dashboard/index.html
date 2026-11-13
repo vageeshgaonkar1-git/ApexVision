@@ -382,13 +382,17 @@ const ringBuf = { A: [], B: [] };
 let spdEmaA = 0, spdEmaB = 0;
 
 // ── Client-side stall tracker ─────────────────────────────────
-// Tracks how long a sensor has been continuously occupied
-// independent of the firmware's State 2 requirement
+// Tracks how long a sensor has been CONTINUOUSLY occupied.
+// A clearance only resets the timer if the sensor stays CLEAR
+// for at least STALL_CLEAR_GAP_MS — this prevents back-to-back
+// vehicles (brief gap between them) from resetting the timer
+// and being mistaken for a single standing vehicle.
 const clientStall = {
-  A: { startMs: null, sec: 0 },
-  B: { startMs: null, sec: 0 }
+  A: { startMs: null, sec: 0, clearSinceMs: null },
+  B: { startMs: null, sec: 0, clearSinceMs: null }
 };
-const CLIENT_STALL_ALERT_SEC = 8;  // alert if either side occupied > this
+const CLIENT_STALL_ALERT_SEC = 120;  // 2 minutes continuous occupation → alert
+const STALL_CLEAR_GAP_MS     = 2000; // sensor must be clear ≥ 2 s to reset stall timer
 
 // ── App state ────────────────────────────────────────────────
 let isSimMode   = false;
@@ -512,42 +516,63 @@ setInterval(poll, 500);
 poll();
 
 // ── Client-side stall tracker ─────────────────────────────────
-// Firmware stall only triggers on State 2 (both sensors).
-// Client tracks single-sensor stall too.
+// Logic:
+//  • When sensor goes below threshold → start timer (if not already running)
+//  • When sensor clears → start a "clearance window" timer
+//  • If sensor drops again before STALL_CLEAR_GAP_MS expires
+//    → resume the existing stall timer (back-to-back vehicles)
+//  • Only if sensor stays clear ≥ STALL_CLEAR_GAP_MS
+//    → genuinely reset the stall timer (road is clear)
 function updateClientStall(cA, cB, tA, tB, nowMs) {
-  const occA = cA !== null && cA < tA;
-  const occB = cB !== null && cB < tB;
+  updateOneSensor('A', cA !== null && cA < tA, nowMs);
+  updateOneSensor('B', cB !== null && cB < tB, nowMs);
 
-  // Sensor A
-  if (occA) {
-    if (!clientStall.A.startMs) clientStall.A.startMs = nowMs;
-    clientStall.A.sec = (nowMs - clientStall.A.startMs) / 1000;
-  } else {
-    clientStall.A.startMs = null;
-    clientStall.A.sec = 0;
-  }
-  // Sensor B
-  if (occB) {
-    if (!clientStall.B.startMs) clientStall.B.startMs = nowMs;
-    clientStall.B.sec = (nowMs - clientStall.B.startMs) / 1000;
-  } else {
-    clientStall.B.startMs = null;
-    clientStall.B.sec = 0;
-  }
-
-  // Show whichever stall is longer
+  // Display whichever side has been occupied longer
   const maxStall = Math.max(clientStall.A.sec, clientStall.B.sec);
-  document.getElementById('kpiStall').textContent = `Stall: ${maxStall.toFixed(1)} s`;
+  const mins = Math.floor(maxStall / 60);
+  const secs = Math.floor(maxStall % 60);
+  const display = maxStall >= 60
+    ? `Stall: ${mins}m ${secs}s`
+    : `Stall: ${maxStall.toFixed(1)} s`;
+  document.getElementById('kpiStall').textContent = display;
 
-  // Client-side stall alert (independent of firmware State 3)
+  // Fire alert when either sensor exceeds 2-minute threshold
   const side = clientStall.A.sec >= CLIENT_STALL_ALERT_SEC ? 'A'
              : clientStall.B.sec >= CLIENT_STALL_ALERT_SEC ? 'B' : null;
   if (side) {
     const sec = Math.round(clientStall[side].sec);
+    const m   = Math.floor(sec / 60), s = sec % 60;
     document.getElementById('overlayStall').textContent =
-      `Sensor ${side} occupied for ${sec} s`;
-    if (!alertDismissed) {
+      `Sensor ${side} occupied for ${m}m ${s}s — possible stalled vehicle`;
+    if (!alertDismissed)
       document.getElementById('emergencyOverlay').classList.add('show');
+  }
+}
+
+function updateOneSensor(sensor, occupied, nowMs) {
+  const st = clientStall[sensor];
+  if (occupied) {
+    // Vehicle present
+    st.clearSinceMs = null;        // cancel any pending clear window
+    if (!st.startMs) st.startMs = nowMs;   // start stall timer if not running
+    st.sec = (nowMs - st.startMs) / 1000;
+  } else {
+    // Sensor clear
+    if (st.startMs !== null) {
+      // Was occupied — start clearance window
+      if (st.clearSinceMs === null) st.clearSinceMs = nowMs;
+      const clearDuration = nowMs - st.clearSinceMs;
+      if (clearDuration >= STALL_CLEAR_GAP_MS) {
+        // Clear long enough — genuinely reset
+        st.startMs     = null;
+        st.clearSinceMs= null;
+        st.sec         = 0;
+      }
+      // else: still within gap window — keep timer running (back-to-back vehicle)
+    } else {
+      // Was already clear — nothing to do
+      st.clearSinceMs = null;
+      st.sec = 0;
     }
   }
 }
@@ -720,9 +745,12 @@ function dispatchPatrol() {
 function clearEmergency() {
   logAction('Emergency cleared by operator');
   pushConfigDirect({ modeOverride: 'NONE' });
-  // Reset client stall timers so the alert doesn't immediately re-fire
-  clientStall.A.startMs = null; clientStall.A.sec = 0;
-  clientStall.B.startMs = null; clientStall.B.sec = 0;
+  // Full reset of stall timers
+  for (const s of ['A','B']) {
+    clientStall[s].startMs     = null;
+    clientStall[s].clearSinceMs= null;
+    clientStall[s].sec         = 0;
+  }
   dismissOverlay();
 }
 function dismissOverlay() {
@@ -840,8 +868,11 @@ document.getElementById('simToggle').addEventListener('change', e => {
   bootTs = Date.now(); simT = 0;
   ringBuf.A = []; ringBuf.B = [];
   spdEmaA = 0; spdEmaB = 0;
-  clientStall.A.startMs = null; clientStall.A.sec = 0;
-  clientStall.B.startMs = null; clientStall.B.sec = 0;
+  for (const s of ['A','B']) {
+    clientStall[s].startMs     = null;
+    clientStall[s].clearSinceMs= null;
+    clientStall[s].sec         = 0;
+  }
   alertDismissed = false;
   logAction(isSimMode ? 'Simulator ON' : 'Simulator OFF');
 });
