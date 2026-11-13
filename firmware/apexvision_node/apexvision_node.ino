@@ -2,21 +2,35 @@
 //  ApexVision — Blind-Curve Hazard Warning Node
 //  Target : ESP32 (38-pin or DevKit V1)
 //
-//  Hardware connections (prototype):
-//    I2C SDA       → GPIO 21
-//    I2C SCL       → GPIO 22
-//    XSHUT Sensor A→ GPIO 18   (Sensor A reassigned to 0x30)
-//    XSHUT Sensor B→ GPIO 19   (Sensor B stays at 0x29)
-//    RED LED       → GPIO 25   (danger / both-side alert)
-//    YELLOW LED    → GPIO 26   (caution / one-side alert)
+//  Hardware connections (final wiring):
+//
+//  Sensor A (left approach — GY-53 / VL53L0X)
+//    VCC   → 3V3
+//    GND   → GND
+//    SDA   → GPIO 21
+//    SCL   → GPIO 22
+//    XSHUT → GPIO 16   (reassigns Sensor A to I2C 0x30)
+//    GPIO1 → leave empty
+//
+//  Sensor B (right approach — GY-53 / VL53L0X)
+//    VCC   → 3V3
+//    GND   → GND
+//    SDA   → GPIO 21   (shared I2C bus)
+//    SCL   → GPIO 22   (shared I2C bus)
+//    XSHUT → GPIO 17   (Sensor B stays at 0x29)
+//    GPIO1 → leave empty
+//
+//  3-light traffic module
+//    Y (Yellow) → GPIO 18   (one-side caution)
+//    R (Red)    → GPIO 19   (both-side danger / stall)
+//    GND        → GND
 //
 //  Requires: Adafruit_VL53L0X, WiFiClientSecure, HTTPClient, ArduinoJson
 //  Firebase RTDB: apexvision-8f1e4 (Test Mode, no auth)
 //
 //  Core assignment:
-//    Core 1 (default Arduino core) — ToF reads, EMA, state machine, LEDs
-//    Core 0 (FreeRTOS task)        — Firebase PUT telemetry + GET config
-//    This keeps real-time LED blinking jitter-free even during TLS hangs.
+//    Core 1 (Arduino loop()) — ToF reads, EMA, state machine, LEDs (~40 Hz)
+//    Core 0 (FreeRTOS task)  — Firebase PUT telemetry + GET config (non-blocking)
 // =============================================================
 
 #include <Wire.h>
@@ -43,13 +57,14 @@ const char* NODE_ID = "node_01";
 // ─────────────────────────────────────────────
 #define SDA_PIN     21
 #define SCL_PIN     22
-#define XSHUT_A     18
-#define XSHUT_B     19
-#define ADDR_A      0x30    // Sensor A reassigned
-#define ADDR_B      0x29    // Sensor B default
+#define XSHUT_A     16      // Sensor A XSHUT → reassigned to 0x30
+#define XSHUT_B     17      // Sensor B XSHUT → stays at 0x29
+#define ADDR_A      0x30
+#define ADDR_B      0x29
 
-#define RED_LED     25
-#define YELLOW_LED  26
+// 3-light traffic module
+#define YELLOW_LED  18      // Y pin → one-side caution
+#define RED_LED     19      // R pin → both-side danger / stall
 
 // ─────────────────────────────────────────────
 //  Calibration & Detection
