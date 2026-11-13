@@ -138,8 +138,8 @@ struct ConfigUpdate {
   bool   recalibrate;
 };
 
-volatile TelemetrySnapshot latestTelemetry = {};
-volatile ConfigUpdate      pendingConfig   = {};
+TelemetrySnapshot latestTelemetry = {};
+ConfigUpdate      pendingConfig   = {};
 SemaphoreHandle_t          telemMutex      = NULL;
 SemaphoreHandle_t          configMutex     = NULL;
 
@@ -312,7 +312,7 @@ void firebaseTask(void* param) {
       // Snapshot under mutex
       TelemetrySnapshot snap = {};
       if (xSemaphoreTake(telemMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        snap = (TelemetrySnapshot)latestTelemetry;
+        snap = latestTelemetry;
         xSemaphoreGive(telemMutex);
       }
 
