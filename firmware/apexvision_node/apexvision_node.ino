@@ -454,26 +454,48 @@ bool reinitSensor(bool isA) {
 }
 
 // =============================================================
-//  READ SENSOR
+//  READ SENSOR — clamped to 30–2000 mm
+//  Returns 2000.0f (lane clear) instead of 9999.0f so the EMA
+//  filter never spikes on a clear-road reading.
+//  RangeStatus 4 = phase failure (no object) → treat as 2000 mm.
+//  8190/8191 wrap-around readings are also clamped to 2000 mm.
 // =============================================================
 float readSensor(bool isA) {
   VL53L0X_RangingMeasurementData_t measure;
   if (isA && sensorA_ok) {
     sensorA.rangingTest(&measure, false);
-    if (measure.RangeStatus != 4) return (float)measure.RangeMilliMeter;
+    if (measure.RangeStatus != 4
+        && measure.RangeMilliMeter >= 30
+        && measure.RangeMilliMeter <= 2000) {
+      return (float)measure.RangeMilliMeter;
+    }
   } else if (!isA && sensorB_ok) {
     sensorB.rangingTest(&measure, false);
-    if (measure.RangeStatus != 4) return (float)measure.RangeMilliMeter;
+    if (measure.RangeStatus != 4
+        && measure.RangeMilliMeter >= 30
+        && measure.RangeMilliMeter <= 2000) {
+      return (float)measure.RangeMilliMeter;
+    }
   }
-  return 9999.0f;
+  // Return max range (clear lane) — never 9999 — so EMA stays clean
+  return 2000.0f;
 }
 
 // =============================================================
 //  EMA SMOOTHING
+//  Only update EMA on real detections (< 2000 mm).
+//  2000.0f is the clear-lane sentinel — do not feed it into EMA
+//  or it will push emaA/emaB upward and delay detection.
 // =============================================================
 void updateEMA() {
-  if (dA < 9000.0f) emaA = EMA_ALPHA * dA + (1.0f - EMA_ALPHA) * emaA;
-  if (dB < 9000.0f) emaB = EMA_ALPHA * dB + (1.0f - EMA_ALPHA) * emaB;
+  if (dA >= 30.0f && dA < 2000.0f)
+    emaA = EMA_ALPHA * dA + (1.0f - EMA_ALPHA) * emaA;
+  if (dB >= 30.0f && dB < 2000.0f)
+    emaB = EMA_ALPHA * dB + (1.0f - EMA_ALPHA) * emaB;
+  // When lane is clear, let EMA drift back toward 2000 mm slowly
+  // so the state machine correctly reads "not occupied"
+  if (dA >= 2000.0f) emaA = min(emaA + 20.0f, 2000.0f);
+  if (dB >= 2000.0f) emaB = min(emaB + 20.0f, 2000.0f);
 }
 
 // =============================================================
