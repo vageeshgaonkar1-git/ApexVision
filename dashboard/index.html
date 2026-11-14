@@ -613,17 +613,17 @@ function updateKPI(d, cA, cB, spA, spB) {
   const elDB = document.getElementById('kpiDB');
   if (cA !== null) {
     elDA.textContent = cA;
-    elDA.style.fontSize = '';           // restore default kpi-val size
-    document.getElementById('unitDA').textContent = 'mm';
+    elDA.style.fontSize = '';
+    document.getElementById('unitDA').textContent = cA >= (d.threshA ?? 150) ? 'mm — clear' : 'mm';
   } else {
     elDA.textContent = 'Out of Range';
-    elDA.style.fontSize = '0.9rem';     // shrink to fit the text
+    elDA.style.fontSize = '0.9rem';
     document.getElementById('unitDA').textContent = '';
   }
   if (cB !== null) {
     elDB.textContent = cB;
     elDB.style.fontSize = '';
-    document.getElementById('unitDB').textContent = 'mm';
+    document.getElementById('unitDB').textContent = cB >= (d.threshB ?? 150) ? 'mm — clear' : 'mm';
   } else {
     elDB.textContent = 'Out of Range';
     elDB.style.fontSize = '0.9rem';
