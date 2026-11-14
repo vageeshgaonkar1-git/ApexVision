@@ -166,7 +166,7 @@
   <div class="card text-center">
     <p class="text-xs text-slate-400 font-medium mb-1">Sensor A</p>
     <p class="kpi-val text-cyan-400" id="kpiDA">—</p>
-    <p class="kpi-unit">mm</p>
+    <p class="kpi-unit" id="unitDA">mm</p>
     <div class="rbar-bg"><div id="barA" class="rbar-fill" style="width:0%;background:#22d3ee"></div></div>
     <p class="text-xs text-slate-500 mt-1">thresh <span id="threshADisp">—</span> mm</p>
     <div class="mt-1"><span id="spdBadgeA" class="speed-badge spd-stationary">— km/h</span></div>
@@ -176,7 +176,7 @@
   <div class="card text-center">
     <p class="text-xs text-slate-400 font-medium mb-1">Sensor B</p>
     <p class="kpi-val text-teal-400" id="kpiDB">—</p>
-    <p class="kpi-unit">mm</p>
+    <p class="kpi-unit" id="unitDB">mm</p>
     <div class="rbar-bg"><div id="barB" class="rbar-fill" style="width:0%;background:#2dd4bf"></div></div>
     <p class="text-xs text-slate-500 mt-1">thresh <span id="threshBDisp">—</span> mm</p>
     <div class="mt-1"><span id="spdBadgeB" class="speed-badge spd-stationary">— km/h</span></div>
@@ -484,20 +484,25 @@ function estimateSpeed(sensor, newDist, nowMs) {
 }
 
 // ── Simulator ────────────────────────────────────────────────
+// Produces realistic OOR (2500) + approach/recession cycles:
+//  - Each sensor sweeps from 2500 (OOR) → ~100 mm → back to 2500
+//  - When value > 2000, firmware would push 2500 (OOR sentinel)
+//  - clampTof(2500) → null → shows "Out of Range"
 function simTelemetry() {
-  simT += 0.12;
-  // Wider swing so vehicles actually cross threshold and produce measurable speed
-  const rawA = 800 + 700 * Math.sin(simT * 0.55);   // 100 – 1500 mm
-  const rawB = 900 + 650 * Math.cos(simT * 0.4);    // 250 – 1550 mm
+  simT += 0.08;
+  // Full sweep: 2500 → 100 → 2500 (crosses OOR boundary)
+  const rawA = 1300 + 1200 * Math.sin(simT * 0.5);   // ~100 – 2500 mm
+  const rawB = 1300 + 1200 * Math.cos(simT * 0.4);   // ~100 – 2500 mm
   const threshA = 500, threshB = 500;
-  const occA = rawA < threshA, occB = rawB < threshB;
+  // Clamp to OOR sentinel if above 2000 (mimics firmware behaviour)
+  const dA = rawA > 2000 ? 2500 : Math.max(30, Math.round(rawA));
+  const dB = rawB > 2000 ? 2500 : Math.max(30, Math.round(rawB));
+  const occA = dA < threshA, occB = dB < threshB;
   let state = 0;
   if (occA && occB) state = 2;
   else if (occA || occB) state = 1;
   return {
-    dA: Math.max(30, Math.round(rawA)),
-    dB: Math.max(30, Math.round(rawB)),
-    threshA, threshB, state, stallSec: 0,
+    dA, dB, threshA, threshB, state, stallSec: 0,
     modeOverride: 'NONE',
     rssi: -58, uptimeSec: Math.round((Date.now() - bootTs) / 1000),
     sensorA_ok: true, sensorB_ok: true
@@ -604,8 +609,26 @@ function updateOneSensor(sensor, occupied, nowMs) {
 // ── KPI update ───────────────────────────────────────────────
 function updateKPI(d, cA, cB, spA, spB) {
   // Distance — null means > 2000 mm (OOR sentinel from firmware)
-  document.getElementById('kpiDA').textContent = cA !== null ? cA : 'Out of Range';
-  document.getElementById('kpiDB').textContent = cB !== null ? cB : 'Out of Range';
+  const elDA = document.getElementById('kpiDA');
+  const elDB = document.getElementById('kpiDB');
+  if (cA !== null) {
+    elDA.textContent = cA;
+    elDA.style.fontSize = '';           // restore default kpi-val size
+    document.getElementById('unitDA').textContent = 'mm';
+  } else {
+    elDA.textContent = 'Out of Range';
+    elDA.style.fontSize = '0.9rem';     // shrink to fit the text
+    document.getElementById('unitDA').textContent = '';
+  }
+  if (cB !== null) {
+    elDB.textContent = cB;
+    elDB.style.fontSize = '';
+    document.getElementById('unitDB').textContent = 'mm';
+  } else {
+    elDB.textContent = 'Out of Range';
+    elDB.style.fontSize = '0.9rem';
+    document.getElementById('unitDB').textContent = '';
+  }
   document.getElementById('threshADisp').textContent = d.threshA ?? '—';
   document.getElementById('threshBDisp').textContent = d.threshB ?? '—';
   document.getElementById('threshAFW').textContent = d.threshA ?? '—';
