@@ -40,6 +40,12 @@ India records **1,68,491 annual road fatalities** (MoRTH Road Accident Report). 
 
 ## 🏗️ 2. System Architecture
 
+### Schematic Diagram
+
+![Schematic Diagram — Smart Blind-Curve Hazard Warning Node](assets/schematic.jpeg)
+
+> Full schematic: ESP32 DevKit V1 · dual VL53L0X ToF sensors · LM2596 buck converter · 2S BMS · 3-light traffic module. Team OutOfMemory · COLOSSUS 3.0.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │               OFF-GRID SOLAR & 2S BATTERY POWER STAGE                      │
